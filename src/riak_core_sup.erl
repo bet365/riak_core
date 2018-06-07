@@ -79,6 +79,9 @@ init([]) ->
                   ?CHILD(riak_core_claimant, worker),
                   ?CHILD(riak_core_table_owner, worker),
                   ?CHILD(riak_core_stat_sup, supervisor),
+                  ?CHILD(riak_core_apl_blacklist, worker),
+                  ?CHILD(riak_core_remote_vnode_load_monitor, worker),
+                  ?CHILD(riak_core_index_owner_watcher, worker),
                   [EnsembleSup || ensembles_enabled()]
                  ]),
 
