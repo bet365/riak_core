@@ -35,16 +35,17 @@ start_link(Name) ->
 reset() ->
     gen_server:cast(?SERVER, reset).
 
-update_responsiveness_measurement(Code, Idx, StartTime, Endtime) ->
-    gen_server:cast(Code, {update, Idx, StartTime, Endtime}).
-
+update_responsiveness_measurement(passed, Code, Idx, StartTime, Endtime) ->
+    gen_server:cast(Code, {update_passed, Idx, StartTime, Endtime});
+update_responsiveness_measurement(failed, Code, Idx, StartTime, Endtime) ->
+    gen_server:cast(Code, {update_failed, Idx, StartTime, Endtime});
 
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
 init([Name]) ->
     TableName = list_to_atom(atom_to_list(Name) ++ "_table"),
-    Table = ets:new(TableName, [named_table, protected, ordered_set]),
+    Table = ets:new(TableName, [named_table, protected, bag]),
     {ok, #state{table = Table, name = Name}}.
 
 handle_call(_Request, _From, State) ->
@@ -53,11 +54,23 @@ handle_call(_Request, _From, State) ->
 handle_cast(reset, State) ->
     {noreply, State};
 
-handle_cast({update, Idx, T0, T1}, State=#state{table = Tab, name = Name}) ->
+handle_cast({update_passed, Idx, T0, T1}, State=#state{table = Tab, name = Name}) ->
+    Diff = timer:now_diff(T1, T0),
+    case ets:lookup(Tab, Idx) of
+        [] ->
+            ets:insert(Tab, {Idx, Diff});
+        [{Idx, Value}] ->
+            ets:insert(Tab, {Idx, Diff})
+    end,
+    lager:info("remote_load_monitor ~p -> diff ~p; Idx ~p", [Name, Diff, Idx]),
+    {noreply, State};
+
+handle_cast({update_failed, Idx, T0, T1}, State=#state{table = Tab, name = Name}) ->
     Diff = timer:now_diff(T1, T0),
     ets:insert(Tab, {Idx, Diff}),
     lager:info("remote_load_monitor ~p -> diff ~p; Idx ~p", [Name, Diff, Idx]),
     {noreply, State};
+
 
 handle_cast(_Request, State) ->
     {noreply, State}.
