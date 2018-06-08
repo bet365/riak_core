@@ -1,4 +1,4 @@
--module(riak_core_optimised_apl).
+-module(riak_core_apl_blacklist).
 
 -behaviour(gen_server).
 
