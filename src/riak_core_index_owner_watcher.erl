@@ -54,13 +54,22 @@ init([]) ->
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
-handle_cast({ring_update, Ring}, State = #state{all_owners = AllOwners}) ->
+handle_cast({ring_update, Ring}, State = #state{all_owners = OldAllOwners}) ->
     NewAllOwners =  riak_core_ring:all_owners(Ring),
-    case NewAllOwners == AllOwners of
+    case NewAllOwners == OldAllOwners of
         true ->
             {noreply, State};
         false ->
-            lager:info("index owner watcher, owners have changed"),
+            TransferredIndexes = NewAllOwners -- OldAllOwners,
+            DeletedIndexes = OldAllOwners -- NewAllOwners,
+
+            lager:info(
+               "index owner watcher, owners have changed" ++
+               "transferred index: ~p" ++
+               "deleted indexes ~p",
+                [TransferredIndexes, DeletedIndexes]
+            ),
+
             {noreply, State#state{all_owners = NewAllOwners}}
     end;
 
