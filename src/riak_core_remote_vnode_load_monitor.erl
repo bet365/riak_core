@@ -5,8 +5,9 @@
 %% API
 -export(
 [
-    start_link/0,
-    reset/0
+    start_link/1,
+    reset/0,
+    update_responsiveness_measurement/4
 
 ]).
 
@@ -20,27 +21,42 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {}).
+-record(state, {
+    name,
+    table
+}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
-start_link() ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+start_link(Name) ->
+    gen_server:start_link({local, Name}, ?MODULE, [Name], []).
 
 reset() ->
     gen_server:cast(?SERVER, reset).
 
+update_responsiveness_measurement(Code, Idx, StartTime, Endtime) ->
+    gen_server:cast(Code, {update, Idx, StartTime, Endtime}).
+
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
-init([]) ->
-    {ok, #state{}}.
+init([Name]) ->
+    TableName = list_to_atom(atom_to_list(Name) ++ "_table"),
+    Table = ets:new(TableName, [named_table, protected, ordered_set]),
+    {ok, #state{table = Table, name = Name}}.
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
 handle_cast(reset, State) ->
+    {noreply, State};
+
+handle_cast({update, Idx, T0, T1}, State=#state{table = Tab, name = Name}) ->
+    Diff = timer:now_diff(T1, T0),
+    ets:insert(Tab, {Idx, Diff}),
+    lager:info("remote_load_monitor ~p -> diff ~p; Idx ~p", [Name, Diff, Idx]),
     {noreply, State};
 
 handle_cast(_Request, State) ->

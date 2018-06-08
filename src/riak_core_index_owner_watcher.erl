@@ -63,11 +63,14 @@ handle_cast({ring_update, Ring}, State = #state{all_owners = OldAllOwners}) ->
             TransferredIndexes = NewAllOwners -- OldAllOwners,
             DeletedIndexes = OldAllOwners -- NewAllOwners,
 
+            NodesWithTransfers = lists:usort([Node || {_Index, Node} <- TransferredIndexes]),
+            NodesWithDeletetions = lists:usort([Node || {_Index, Node} <- DeletedIndexes]),
+
             lager:info(
-               "index owner watcher, owners have changed" ++
-               "transferred index: ~p" ++
-               "deleted indexes ~p",
-                [TransferredIndexes, DeletedIndexes]
+               "index owner watcher, owners have changed ~n" ++
+               "nodes with new indexes: ~p ~n" ++
+               "nodes with deleted indexes ~p ~n",
+                [NodesWithTransfers, NodesWithDeletetions]
             ),
 
             {noreply, State#state{all_owners = NewAllOwners}}

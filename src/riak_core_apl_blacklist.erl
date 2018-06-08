@@ -5,8 +5,7 @@
 %% API
 -export(
 [
-    start_link/0,
-    update_responsiveness_measurement/4
+    start_link/0
 ]).
 
 %% gen_server callbacks
@@ -20,8 +19,10 @@
 -define(SERVER, ?MODULE).
 
 -record(state, {
-    table
+
 }).
+
+%% TODO: this needs to receive updates from node_watcher_events in order to send to 'up nodes'
 
 %%%===================================================================
 %%% API
@@ -29,15 +30,11 @@
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
-update_responsiveness_measurement(Code, Idx, StartTime, Endtime) ->
-    gen_server:cast(?SERVER, {update, Code, Idx, StartTime, Endtime}).
-
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
 init([]) ->
-    Table = ets:new(responsive_tab, [named_table, protected, ordered_set]),
-    {ok, #state{table = Table}}.
+    {ok, #state{}}.
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
