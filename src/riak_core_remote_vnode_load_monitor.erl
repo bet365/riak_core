@@ -7,7 +7,7 @@
 [
     start_link/1,
     reset/0,
-    update_responsiveness_measurement/4
+    update_responsiveness_measurement/5
 
 ]).
 
@@ -38,7 +38,7 @@ reset() ->
 update_responsiveness_measurement(passed, Code, Idx, StartTime, Endtime) ->
     gen_server:cast(Code, {update_passed, Idx, StartTime, Endtime});
 update_responsiveness_measurement(failed, Code, Idx, StartTime, Endtime) ->
-    gen_server:cast(Code, {update_failed, Idx, StartTime, Endtime});
+    gen_server:cast(Code, {update_failed, Idx, StartTime, Endtime}).
 
 %%%===================================================================
 %%% gen_server callbacks
