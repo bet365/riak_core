@@ -22,8 +22,6 @@
 
 }).
 
-%% TODO: this needs to receive updates from node_watcher_events in order to send to 'up nodes'
-
 %%%===================================================================
 %%% API
 %%%===================================================================

@@ -46,9 +46,9 @@ init([]) ->
             {'get_error', {'riak_core_remote_vnode_load_monitor', start_link, [get_error]}, Restart, Shutdown, Type, ['riak_core_remote_vnode_load_monitor']},
 
             %% get read repairs
-            {'get_rr_ok', {'riak_core_remote_vnode_load_monitor', start_link, [get_ok]}, Restart, Shutdown, Type, ['riak_core_remote_vnode_load_monitor']},
-            {'get_rr_notfound', {'riak_core_remote_vnode_load_monitor', start_link, [get_notfound]}, Restart, Shutdown, Type, ['riak_core_remote_vnode_load_monitor']},
-            {'get_rr_error', {'riak_core_remote_vnode_load_monitor', start_link, [get_error]}, Restart, Shutdown, Type, ['riak_core_remote_vnode_load_monitor']}
+            {'get_rr_ok', {'riak_core_remote_vnode_load_monitor', start_link, [get_rr_ok]}, Restart, Shutdown, Type, ['riak_core_remote_vnode_load_monitor']},
+            {'get_rr_notfound', {'riak_core_remote_vnode_load_monitor', start_link, [get_rr_notfound]}, Restart, Shutdown, Type, ['riak_core_remote_vnode_load_monitor']},
+            {'get_rr_error', {'riak_core_remote_vnode_load_monitor', start_link, [get_rr_error]}, Restart, Shutdown, Type, ['riak_core_remote_vnode_load_monitor']}
 
 
         ],

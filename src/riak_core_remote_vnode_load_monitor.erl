@@ -59,7 +59,7 @@ handle_cast({update_passed, Idx, T0, T1}, State=#state{table = Tab, name = Name}
     case ets:lookup(Tab, Idx) of
         [] ->
             ets:insert(Tab, {Idx, Diff});
-        [{Idx, Value}] ->
+        [{Idx, _Value}] ->
             ets:insert(Tab, {Idx, Diff})
     end,
     lager:info("remote_load_monitor ~p -> diff ~p; Idx ~p", [Name, Diff, Idx]),
