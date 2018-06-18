@@ -43,9 +43,9 @@ start_link(Index) ->
 reset(Idx) ->
     gen_server:cast(list_to_atom(integer_to_list(Idx)), reset).
 
-update_responsiveness_measurement(passed, Code, Idx, StartTime, Endtime) ->
+update_responsiveness_measurement(request_response_pass, Code, Idx, StartTime, Endtime) ->
     gen_server:cast(list_to_atom(integer_to_list(Idx)), {update_passed, Code, StartTime, Endtime});
-update_responsiveness_measurement(failed, Code, Idx, StartTime, Endtime) ->
+update_responsiveness_measurement(request_response_fail, Code, Idx, StartTime, Endtime) ->
     gen_server:cast(list_to_atom(integer_to_list(Idx)), {update_failed, Code, StartTime, Endtime}).
 
 %%%===================================================================
@@ -85,11 +85,11 @@ handle_cast({update_passed, Code, T0, T1}, State=#state{request_response_pairs =
     case dict:find(Code, Dict) of
         error ->
             CodeDict0 = make_new_code_dictionary(),
-            NewState = update_distributions(passed, CodeDict0, Diff, State),
+            NewState = update_distributions(request_response_pass, CodeDict0, Diff, State),
             {noreply, NewState};
         CodeDict0 ->
-            _ = maybe_blacklist_vnode(passed, Code, Diff, State),
-            NewState = update_distributions(passed, CodeDict0, Diff, State),
+            _ = maybe_blacklist_vnode(request_response_pass, Code, Diff, State),
+            NewState = update_distributions(request_response_pass, CodeDict0, Diff, State),
             {noreply, NewState}
     end;
 
@@ -98,16 +98,12 @@ handle_cast({update_failed, Code, T0, T1}, State=#state{request_response_pairs =
     case dict:find(Code, Dict) of
         error ->
             CodeDict0 = make_new_code_dictionary(),
-            CodeDict1 = add_timing_calculations_to_code_dictioanry(failed, CodeDict0, Diff, State),
-            {noreply, State#state{request_response_pairs = dict:store(Code, CodeDict1, Dict)}};
+            NewState = update_distributions(request_response_fail, CodeDict0, Diff, State),
+            {noreply, NewState};
         CodeDictionary0 ->
-            CodeDictionary1 = add_timing_calculations_to_code_dictioanry(failed, CodeDictionary0, Diff, State),
-            {noreply, State#state{request_response_pairs = dict:store(Code, CodeDictionary1, Dict)}}
+            NewState = update_distributions(request_response_fail, CodeDictionary0, Diff, State),
+            {noreply, NewState}
     end;
-
-
-
-
 
 
 handle_cast(_Request, State) ->
@@ -140,12 +136,12 @@ make_new_code_dictionary() ->
     D2.
 
 
-maybe_blacklist_vnode(passed, _Code, _Diff, _Dict) ->
+maybe_blacklist_vnode(request_response_pass, _Code, _Diff, _Dict) ->
     % deviation = (diff - mean) / std
     % we will use this measurement and a set threshold to determine whether or not to forward on  the information
     % over to riak_core_apl_blacklist
     ok;
-maybe_blacklist_vnode(failed, _Code, _Diff, _Dict) ->
+maybe_blacklist_vnode(request_response_fail, _Code, _Diff, _Dict) ->
     % the rules here will be slightly different as we will be saving different information
     ok.
 
@@ -164,38 +160,52 @@ move_distributions(Dict) ->
 
 
 
-update_distributions(passed, Dict, Diff, State = #state{n_val_maximum = Max, half_n_val_maximum = HalfMax}) ->
+update_distributions(request_response_pass, Dict, Diff, State = #state{index = Index, n_val_maximum = Max, half_n_val_maximum = HalfMax}) ->
     {ok, Dis1} = dict:find(distribution_1, Dict),
     {_, _, _, N, _, _} = Dis1,
     case {N == Max, N < HalfMax} of
         {true, _} ->
             NewDict0 = move_distributions(Dict),
-            NewDict1 = calculate_new_distribution(passed, 1, NewDict0, Diff),
+            NewDict1 = calculate_new_distribution(request_response_pass, distribution_1, NewDict0, Diff, Index),
             State#state{request_response_pairs = NewDict1};
         {false, true} ->
             % only calculate distribtuion 1
-            NewDict = calculate_new_distribution(passed, 1, Dict, Diff),
+            NewDict = calculate_new_distribution(request_response_pass, distribution_1, Dict, Diff, Index),
             State#state{request_response_pairs = NewDict};
         {false, false} ->
             % calculate both distributions
-            NewDict = calculate_new_distribution(passed, 2, Dict, Diff),
-            State#state{request_response_pairs = NewDict}
+            NewDict0 = calculate_new_distribution(request_response_pass, distribution_1, Dict, Diff, Index),
+            NewDict1 = calculate_new_distribution(request_response_pass, distribution_2, NewDict0, Diff, Index),
+            State#state{request_response_pairs = NewDict1}
     end;
 
-update_distributions(failed, _Dict, _Diff, State) ->
+update_distributions(request_response_fail, _Dict, _Diff, State) ->
     State.
 
 
 
-calculate_new_distribution(passed, 1, Dict, Diff) ->
-    ok;
-calculate_new_distribution(passed, 2, Dict, Diff) ->
-    ok;
+calculate_new_distribution(request_response_pass, Name, Dict, Diff, Index) ->
+    case dict:find(Name, Dict) of
+        error ->
+            lager:error("dictionary did not contain distribtuion data for responsiveness timings at Index: ~p", []),
+            Dict;
+        {ok, {_OldAvg, _OldVar, _OldStd, OldN, OldAvgCumFreq, OldVarCumFreq}} ->
+            N = OldN +1,
+            AvgCumFreq = OldAvgCumFreq + Diff,
+            Avg = AvgCumFreq / N,
+            VarCumFreq = OldVarCumFreq + math:pow((Diff - Avg), 2),
+            Var = VarCumFreq / N,
+            Std = math:sqrt(Var),
+            Value = {Avg, Var, Std, N, AvgCumFreq, VarCumFreq},
+            lager:info("Index: ~p, Distribution: ~p, New Distribtion: ~p", [Index, Name, Value]),
+            dict:store(Name, Value, Dict);
+        {ok, WrongFormat} ->
+            lager:error("Distribtion: ~p, at index:~p has the wrong format: ~p", [Name, Index, WrongFormat]),
+            Dict
+    end;
 
-calculate_new_distribution(failed, 1, Dict, Diff) ->
-    ok;
-calculate_new_distribution(failed, 2, Dict, Diff) ->
-    ok.
+calculate_new_distribution(request_response_fail, _Name, Dict, _Diff, _Index) ->
+    Dict.
 
 
 
