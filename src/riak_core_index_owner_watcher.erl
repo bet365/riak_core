@@ -60,19 +60,8 @@ handle_cast({ring_update, Ring}, State = #state{all_owners = OldAllOwners}) ->
         true ->
             {noreply, State};
         false ->
-            TransferredIndexes = NewAllOwners -- OldAllOwners,
-            DeletedIndexes = OldAllOwners -- NewAllOwners,
-
-            NodesWithTransfers = lists:usort([Node || {_Index, Node} <- TransferredIndexes]),
-            NodesWithDeletetions = lists:usort([Node || {_Index, Node} <- DeletedIndexes]),
-
-            lager:info(
-               "index owner watcher, owners have changed ~n" ++
-               "nodes with new indexes: ~p ~n" ++
-               "nodes with deleted indexes ~p ~n",
-                [NodesWithTransfers, NodesWithDeletetions]
-            ),
-
+            AllIndexes = [Index || {Index, _Node} <- OldAllOwners],
+            [riak_core_remote_vnode_load_monitor:reset(Index) || Index <- AllIndexes],
             {noreply, State#state{all_owners = NewAllOwners}}
     end;
 
@@ -91,3 +80,9 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+
+%%            TransferredIndexes = NewAllOwners -- OldAllOwners,
+%%            DeletedIndexes = OldAllOwners -- NewAllOwners,
+%%            NodesWithTransfers = lists:usort([Node || {_Index, Node} <- TransferredIndexes]),
+%%            NodesWithDeletetions = lists:usort([Node || {_Index, Node} <- DeletedIndexes]),
