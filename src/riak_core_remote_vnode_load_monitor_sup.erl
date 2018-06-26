@@ -17,6 +17,9 @@
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
+%%get_all_indexes() ->
+%%    [Index || {Index, _Pid, _Type, Module} <- supervisor:which_children(?MODULE), Module == [riak_core_vnode_load_monitor]].
+
 %%%===================================================================
 %%% Supervisor callbacks
 %%%===================================================================

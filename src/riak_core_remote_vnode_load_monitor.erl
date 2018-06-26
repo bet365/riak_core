@@ -50,7 +50,7 @@ update_responsiveness_measurement(request_response_fail, Code, Idx, StartTime, E
     gen_server:cast(list_to_atom(integer_to_list(Idx)), {update_failed, Code, StartTime, Endtime}).
 
 get_request_response_measurement_dict(Index) ->
-    gen_server:cast(list_to_atom(integer_to_list(Index)), get_request_response_measurement_dict).
+    gen_server:call(list_to_atom(integer_to_list(Index)), get_request_response_measurement_dict).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -106,8 +106,8 @@ handle_cast({update_failed, Code, T0, T1}, State=#state{request_response_pairs =
             CodeDict0 = make_new_code_dictionary(),
             CodeDict1 = update_distributions(request_response_fail, CodeDict0, Diff, State, Code),
             {noreply, State#state{request_response_pairs = dict:store(Code, CodeDict1, Dict)}};
-        {ok, CodeDictionary0} ->
-            CodeDict1 = update_distributions(request_response_fail, CodeDictionary0, Diff, State, Code),
+        {ok, CodeDict0} ->
+            CodeDict1 = update_distributions(request_response_fail, CodeDict0, Diff, State, Code),
             {noreply, State#state{request_response_pairs = dict:store(Code, CodeDict1, Dict)}}
     end;
 
