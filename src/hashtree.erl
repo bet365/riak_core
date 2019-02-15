@@ -355,6 +355,9 @@ delete(Key, State) ->
     Dirty = bitarray_set(Segment, State2#state.dirty_segments),
     State2#state{dirty_segments=Dirty}.
 
+raw_delete(RawKey, State) ->
+    ok = eleveldb:write(State#state.ref, [{delete, RawKey}], []).
+
 -spec should_insert(segment_bin(), proplist(), hashtree()) -> boolean().
 should_insert(HKey, Opts, State) ->
     IfMissing = proplists:get_value(if_missing, Opts, false),
