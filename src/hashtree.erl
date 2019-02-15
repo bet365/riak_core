@@ -107,7 +107,6 @@
          insert/4,
          estimate_keys/1,
          delete/2,
-         raw_delete/2,
          update_tree/1,
          update_snapshot/1,
          update_perform/1,
@@ -353,12 +352,6 @@ delete(Key, State) ->
     HKey = encode(State#state.id, Segment, Key),
     State2 = enqueue_action({delete, HKey}, State),
     %% Dirty = gb_sets:add_element(Segment, State2#state.dirty_segments),
-    Dirty = bitarray_set(Segment, State2#state.dirty_segments),
-    State2#state{dirty_segments=Dirty}.
-
-raw_delete(RawKey, State) ->
-    {_TreeId, Segment, _Key} = decode(RawKey),
-    State2 = enqueue_action({delete, RawKey}, State),
     Dirty = bitarray_set(Segment, State2#state.dirty_segments),
     State2#state{dirty_segments=Dirty}.
 
@@ -1057,7 +1050,7 @@ iterate({ok, K, V}, IS=#itr_state{itr=Itr,
               end,
     KVAcc = case ItrFilterFun of
                 undefined -> [{K, V}];
-                _ -> ItrFilterFun(K, V)
+                _ -> ItrFilterFun(K, V, State)
             end,
     case {SegId, Seg, Segments, IS#itr_state.prefetch} of
         {bad, -1, _, _} ->
