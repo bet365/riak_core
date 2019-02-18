@@ -260,7 +260,6 @@ new({Index,TreeId}, LinkedStore, Options) ->
     NumSegments = proplists:get_value(segments, Options, ?NUM_SEGMENTS),
     Width = proplists:get_value(width, Options, ?WIDTH),
     MemLevels = proplists:get_value(mem_levels, Options, ?MEM_LEVELS),
-    ItrFilterFun = fun(K, V, _) -> [{K, V}] end,
     NumLevels = erlang:trunc(math:log(NumSegments) / math:log(Width)) + 1,
     State = #state{id=encode_id(TreeId),
                    index=Index,
@@ -273,8 +272,7 @@ new({Index,TreeId}, LinkedStore, Options) ->
                    next_rebuild=full,
                    write_buffer=[],
                    write_buffer_count=0,
-                   tree=dict:new(),
-                   itr_filter_fun=ItrFilterFun},
+                   tree=dict:new()},
     State2 = share_segment_store(State, LinkedStore),
     State2.
 
@@ -390,7 +388,7 @@ update_tree(State) ->
     update_perform(State3).
 
 update_perform(State, ItrFilterFun) ->
-    NewState = State#state{itr_filter_fun = ItrFilterFun},
+    NewState = State#state{itr_filter_fun = ItrFilterFun, next_rebuild = full},
     update_perform(NewState).
 
 -spec update_perform(hashtree()) -> hashtree().
