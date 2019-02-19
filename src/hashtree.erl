@@ -130,7 +130,8 @@
          set_next_rebuild/2,
          mark_open_empty/2,
          mark_open_and_check/2,
-         mark_clean_close/2]).
+         mark_clean_close/2,
+         remove_itr_filter_fun/1]).
 -export([compare2/4]).
 -export([multi_select_segment/3, safe_decode/1]).
 
@@ -642,6 +643,9 @@ get_bucket(Level, Bucket, State) ->
         false ->
             get_disk_bucket(Level, Bucket, State)
     end.
+
+remove_itr_filter_fun(State) ->
+    State#state{itr_filter_fun = undefined}.
 
 %%%===================================================================
 %%% Internal functions
