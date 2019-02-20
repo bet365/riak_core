@@ -107,6 +107,7 @@
          insert/4,
          estimate_keys/1,
          delete/2,
+         raw_delete/2,
          update_tree/1,
          update_snapshot/1,
          update_perform/1,
@@ -211,6 +212,7 @@
                                        {delete, binary()}],
                 write_buffer_count :: integer(),
                 dirty_segments     :: hashtree_array(),
+                get_itr_filter_fun :: function(),
                 itr_filter_fun     :: function()
                }).
 
@@ -259,7 +261,7 @@ new({Index,TreeId}, LinkedStore, Options) ->
     NumSegments = proplists:get_value(segments, Options, ?NUM_SEGMENTS),
     Width = proplists:get_value(width, Options, ?WIDTH),
     MemLevels = proplists:get_value(mem_levels, Options, ?MEM_LEVELS),
-    ItrFilterFun = proplists:get_value(itr_filter_fun, Options, undefined),
+    GetItrFilterFun = proplists:get_value(get_itr_filter_fun, Options, undefined),
     NumLevels = erlang:trunc(math:log(NumSegments) / math:log(Width)) + 1,
     State = #state{id=encode_id(TreeId),
                    index=Index,
@@ -273,7 +275,7 @@ new({Index,TreeId}, LinkedStore, Options) ->
                    write_buffer=[],
                    write_buffer_count=0,
                    tree=dict:new(),
-                   itr_filter_fun=ItrFilterFun},
+                   get_itr_filter_fun=GetItrFilterFun},
     State2 = share_segment_store(State, LinkedStore),
     State2.
 
@@ -355,6 +357,9 @@ delete(Key, State) ->
     Dirty = bitarray_set(Segment, State2#state.dirty_segments),
     State2#state{dirty_segments=Dirty}.
 
+raw_delete(Key, State) ->
+    ok = eleveldb:write(State#state.ref, [{delete, Key}], []).
+
 -spec should_insert(segment_bin(), proplist(), hashtree()) -> boolean().
 should_insert(HKey, Opts, State) ->
     IfMissing = proplists:get_value(if_missing, Opts, false),
@@ -387,19 +392,17 @@ update_tree(State) ->
 
 -spec update_perform(hashtree()) -> hashtree().
 update_perform(State=#state{dirty_segments=Dirty, segments=NumSegments}) ->
-    NextRebuild = State#state.next_rebuild,
-    Segments = case NextRebuild of
-                   full ->
-                       ?ALL_SEGMENTS;
-                   incremental ->
-                       %% gb_sets:to_list(Dirty),
-                       bitarray_to_list(Dirty)
-               end,
+    NextRebuild = get_next_rebuild(State#state.next_rebuild),
+    Segments =
+        case NextRebuild of
+            full -> ?ALL_SEGMENTS;
+            incremental -> bitarray_to_list(Dirty)
+        end,
     State2 = maybe_clear_buckets(NextRebuild, State),
     State3 = update_tree(Segments, State2),
     %% State2#state{dirty_segments=gb_sets:new()}
     State3#state{dirty_segments=bitarray_new(NumSegments),
-                 next_rebuild=incremental}.
+                 next_rebuild=set_next_rebuild(incremental)}.
 
 %% Clear buckets if doing a full rebuild
 maybe_clear_buckets(full, State) ->
@@ -438,7 +441,7 @@ clear_buckets(State=#state{id=Id, ref=Ref}) ->
     %% Mark the tree as requiring a full rebuild (will be fixed
     %% reset at end of update_trees) AND dump the in-memory
     %% tree.
-    State#state{next_rebuild = full,
+    State#state{next_rebuild = set_next_rebuild(full),
                 tree = dict:new()}.
             
 
@@ -465,7 +468,7 @@ update_tree(Segments, State=#state{next_rebuild=NextRebuild, width=Width,
             %% to get the detailed segment information.
             lager:warning("Incremental AAE hash was unable to find all required data, "
                           "forcing full rebuild of ~p", [State#state.path]),
-            update_perform(State#state{next_rebuild = full})
+            update_perform(State#state{next_rebuild = set_next_rebuild(full)})
     end.
 
 -spec rehash_tree(hashtree()) -> hashtree().
@@ -493,7 +496,7 @@ rehash_perform(State) ->
 -spec mark_open_empty(index_n()|binary(), hashtree()) -> hashtree().
 mark_open_empty(TreeId, State) when is_binary(TreeId) ->
     State1 = write_meta(TreeId, [{opened, 1}, {closed, 0}], State),
-    State1#state{next_rebuild=incremental};
+    State1#state{next_rebuild=set_next_rebuild(incremental)};
 mark_open_empty(TreeId, State) ->
     mark_open_empty(term_to_binary(TreeId), State).
 
@@ -514,9 +517,9 @@ mark_open_and_check(TreeId, State) when is_binary(TreeId) ->
                                           {opened, OpenedCnt + 1}), State),
     case ClosedCnt =/= OpenedCnt orelse State#state.mem_levels > 0 of
         true ->
-            State#state{next_rebuild = full};
+            State#state{next_rebuild = set_next_rebuild(full)};
         false ->
-            State#state{next_rebuild = incremental}
+            State#state{next_rebuild = set_next_rebuild(incremental)}
     end;
 mark_open_and_check(TreeId, State) ->
     mark_open_and_check(term_to_binary(TreeId), State).
@@ -565,7 +568,7 @@ next_rebuild(#state{next_rebuild=NextRebuild}) ->
 
 -spec set_next_rebuild(hashtree(), next_rebuild()) -> hashtree().
 set_next_rebuild(Tree, NextRebuild) ->
-    Tree#state{next_rebuild = NextRebuild}.
+    Tree#state{next_rebuild = set_next_rebuild(NextRebuild)}.
 
 %% Note: meta is currently a one per file thing, even if there are multiple
 %%       trees per file. This is intentional. If we want per tree metadata
@@ -640,6 +643,21 @@ get_bucket(Level, Bucket, State) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+set_next_rebuild(NextRebuild) ->
+    case app_helper:get_env(riak_core, override_hashtree_next_rebuild, false) of
+        full -> full;
+        incremental -> incremental;
+        _ -> NextRebuild
+    end.
+
+get_next_rebuild(Type) ->
+    case app_helper:get_env(riak_core, override_hashtree_next_rebuild, false) of
+        full -> full;
+        incremental -> incremental;
+        _ -> Type
+    end.
+
 
 -ifndef(old_hash).
 md5(Bin) ->
@@ -785,7 +803,7 @@ rebuild_fold(Level, Groups, State, Type) ->
     lists:foldl(fun rebuild_folder/2, {Level, Type, State, []}, Groups).
 
 rebuild_folder({Bucket, NewHashes}, {Level, Type, StateAcc, BucketsAcc}) ->
-    Hashes = case Type of
+    Hashes = case get_next_rebuild(Type) of
                  full ->
                      orddict:from_list(NewHashes);
                  incremental ->
@@ -805,7 +823,7 @@ rebuild_folder({Bucket, NewHashes}, {Level, Type, StateAcc, BucketsAcc}) ->
         [] ->
             %% No more hash entries, if a full rebuild then disk
             %% already clear.  If not, remove the empty bucket.
-            StateAcc2 = case Type of
+            StateAcc2 = case get_next_rebuild(Type) of
                             full ->
                                 StateAcc;
                             incremental ->
@@ -951,7 +969,7 @@ snapshot(State) ->
 
 -spec multi_select_segment(hashtree(), list('*'|integer()), select_fun(T))
                           -> [{integer(), T}].
-multi_select_segment(#state{id=Id, itr=Itr} = State, Segments, F) ->
+multi_select_segment(#state{id=Id, itr=Itr, index = Index, get_itr_filter_fun = GetItrFilterFun} = State, Segments, F) ->
     [First | Rest] = Segments,
     IS1 = #itr_state{itr=Itr,
                      id=Id,
@@ -960,6 +978,7 @@ multi_select_segment(#state{id=Id, itr=Itr} = State, Segments, F) ->
                      acc_fun=F,
                      segment_acc=[],
                      final_acc=[]},
+    ItrFilterFun = GetItrFilterFun(Index),
     Seek = case First of
                '*' ->
                    encode(Id, 0, <<>>);
@@ -967,7 +986,7 @@ multi_select_segment(#state{id=Id, itr=Itr} = State, Segments, F) ->
                    encode(Id, First, <<>>)
            end,
     IS2 = try
-              iterate(iterator_move(Itr, Seek), IS1, State)
+              iterate(iterator_move(Itr, Seek), IS1, State#state{itr_filter_fun=ItrFilterFun})
           after
               %% Always call prefetch stop to ensure the iterator
               %% is safe to use in the compare.  Requires
@@ -1018,7 +1037,7 @@ iterate({error, invalid_iterator}, IS=#itr_state{itr=Itr,
                                                  remaining_segments=Segments,
                                                  acc_fun=F,
                                                  segment_acc=Acc,
-                                                 final_acc=FinalAcc}, 
+                                                 final_acc=FinalAcc},
         State = #state{itr_filter_fun = _ItrFilterFun}) ->
     case Segments of
         [] ->
