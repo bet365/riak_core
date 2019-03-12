@@ -978,7 +978,16 @@ multi_select_segment(#state{id=Id, itr=Itr, index = Index, get_itr_filter_fun = 
                      acc_fun=F,
                      segment_acc=[],
                      final_acc=[]},
-    ItrFilterFun = GetItrFilterFun(Index),
+
+
+    ItrFilterFun = case GetItrFilterFun of
+                       undefined ->
+                           lager:warning("GetItrFilterFun = undefined; Index: ~p", [Index]),
+                           undefined;
+                       Fun ->
+                           Fun(Index)
+                   end,
+
     Seek = case First of
                '*' ->
                    encode(Id, 0, <<>>);
