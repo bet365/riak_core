@@ -131,12 +131,17 @@ handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
 handle_cast({update, Arg}, State) ->
-    case exometer:update([prefix(), ?APP, update_metric(Arg)], update_value(Arg)) of
+  case app_helper:get_env(?APP, stat) of
+    stats_off ->
+      ok;
+    stats_on ->
+      case exometer:update([prefix(), ?APP, update_metric(Arg)], update_value(Arg)) of
         {error, not_found} ->
-            lager:debug("~p not found on update.", [Arg]);
+          lager:debug("~p not found on update.", [Arg]);
         ok ->
-            ok
-    end,
+          ok
+      end
+  end,
     {noreply, State};
 handle_cast(_Req, State) ->
     {noreply, State}.
