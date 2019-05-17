@@ -131,10 +131,10 @@ handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
 handle_cast({update, Arg}, State) ->
-  case app_helper:get_env(?APP, stat) of
-    stats_off ->
+  case app_helper:get_env(riak_stats, ?MODULE, true) of
+    false ->
       ok;
-    stats_on ->
+    true ->
       case exometer:update([prefix(), ?APP, update_metric(Arg)], update_value(Arg)) of
         {error, not_found} ->
           lager:debug("~p not found on update.", [Arg]);
