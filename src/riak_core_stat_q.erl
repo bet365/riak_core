@@ -38,6 +38,8 @@
 -type stat_name() :: list().
 -type stat_value() :: integer() | [tuple()].
 
+-define(PFX, riak_core_stat:prefix()).
+
 %% @doc To allow for namespacing, and adding richer dimensions, stats
 %% are named with a tuple key. The key (like `{riak_kv, node, gets}' or
 %% `{riak_kv, vnode, puts, time}') can
@@ -51,7 +53,7 @@
 %% in `Path' as a wild card.
 -spec get_stats(path()) -> stats().
 get_stats(Path) ->
-    exometer:get_values(Path).
+    riak_core_stat:get_values(Path).
     %% %% get all the stats that are at Path
     %% calculate_stats(exometer:select(
     %%                     [{ {Path ++ '_','_',enabled}, [], ['$_'] }])).
@@ -61,7 +63,7 @@ calculate_stats(NamesAndTypes) ->
 
 %% Create/lookup a cache/calculation process
 get_stat(Stat) ->
-    exometer:get_value(Stat).
+    riak_core_stat:get_value(Stat).
 
 %% Encapsulate getting a stat value from exometer.
 %%
@@ -71,9 +73,9 @@ get_stat(Stat) ->
 %% broken it stays that way. Should we delete
 %% stats that are broken?
 calc_stat({Name, _Type}) when is_tuple(Name) ->
-    stat_return(exometer:get_value([riak_core_stat:prefix()|tuple_to_list(Name)]));
+    stat_return(riak_core_stat:get_value([?PFX|tuple_to_list(Name)]));
 calc_stat({[_|_] = Name, _Type}) ->
-    stat_return(exometer:get_value([riak_core_stat:prefix()|Name])).
+    stat_return(riak_core_stat:get_value([?PFX|Name])).
 
 stat_return({error,not_found}) -> unavailable;
 stat_return({ok, Value}) -> Value.

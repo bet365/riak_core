@@ -46,8 +46,6 @@ get_env(App) ->
 %% @spec get_env(App :: atom(), Key :: atom()) -> term()
 %% @doc The official way to get a value from the app's env.
 %%      Will return the 'undefined' atom if that key is unset.
-get_env(App, stat) ->
-  get_env(App, stat, stats_off);
 get_env(App, Key) ->
     get_env(App, Key, undefined).
 

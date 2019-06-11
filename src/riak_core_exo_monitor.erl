@@ -43,15 +43,15 @@ new(N, _, Opts) ->
 	  proplists:get_value(folsom_name, Opts, N)}}.
 
 update(_, Value, counter, {_, Name}) ->
-    folsom_metrics:notify_existing_metric(Name, {inc,Value}, counter);
+    riak_stat_mngr:notify(Name, {inc, Value}, counter);
 update(_, Value, Type, {_, Name}) ->
-    folsom_metrics:notify_existing_metric(Name, Value, Type).
+    riak_stat_mngr:notify(Name, Value, Type).
 
 reset(_, _, _) ->
     {error, unsupported}.
 
 get_value(_, Type, {_, Name}, DPs) ->
-    exometer_folsom:get_value(Name, Type, [], DPs).
+    riak_stat_mngr:get_val_fol(Name, Type, [], DPs).
 
 sample(_, _, _) ->
     {error, unsupported}.
@@ -63,7 +63,8 @@ delete(_, _, _) ->
     {error, unsupported}.
 
 get_datapoints(Name, Type, _) ->
-    exometer_folsom:get_datapoints(Name, Type, []).
+  riak_stat_mngr:get_datapoints(Name, Type).
+
 
 options(history, [Size]) ->
     [{size, Size}];

@@ -42,10 +42,10 @@
           %% node the exchange is taking place with
           peer    :: node(),
 
-          %% count of trees that have been buit
+          %% count of trees that have been built
           built   :: non_neg_integer(),
 
-          %% length of time waited to aqcuire remote lock or
+          %% length of time waited to acquire remote lock or
           %% update trees
           timeout :: pos_integer()
          }).
@@ -68,7 +68,7 @@
 
 %% @doc Start an exchange of Cluster Metadata hashtrees between this node
 %% and `Peer'. `Timeout' is the number of milliseconds the process will wait
-%% to aqcuire the remote lock or to upate both trees.
+%% to aqcuire the remote lock or to update both trees.
 -spec start(node(), pos_integer()) -> {ok, pid()} | ignore | {error, term()}.
 start(Peer, Timeout) ->
     gen_fsm:start(?MODULE, [Peer, Timeout], []).
