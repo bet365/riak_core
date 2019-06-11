@@ -80,7 +80,7 @@ register_vnode_stats(Module, Index, Pid) ->
       match, {'_', value} }}]},
 
   RegisterStats = [Stat1, Stat2, Stat3],
-  riak_stat_mngr:register_vnode_stats(RegisterStats).
+    riak_stat_mngr:register_vnode_stats(RegisterStats).
 
 unregister_vnode_stats(Module, Index) ->
     riak_stat_mngr:unregister_stats(Module, Index, vnodeq, ?APP).
@@ -113,7 +113,7 @@ handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
 handle_cast({update, Arg}, State) ->
-  riak_stat_mngr:update_stats(?APP, update_metric(Arg), update_value(Arg), Arg),
+  riak_stat_mngr:update_stats(?APP, update_metric(Arg), update_value(Arg)),
     {noreply, State};
 handle_cast(_Req, State) ->
     {noreply, State}.

@@ -29,7 +29,7 @@
   alias/1, aliases/2, get_values/1, get_value/1,
   reset_stat/1, reset_stat/2, stat_opts/2,
   unregister_stats/4, vnodeq_atom/2,
-  update_stats/3, update_stats/4, show_pats/1, update/4,
+  update_stats/3, show_pats/1, update/4,
   prefix/0, get_datapoints/2, get_datapoints/3, get_val_fol/4,
   get_fol_val/1, notify/3,
   start/0, stop/0,
@@ -55,12 +55,22 @@
   method = lww,     % lww is the default
   priority = meta,  % meta or exom
   aggr = off}).     % default decision for stats, turn aggregation off.
-                    % some stats are aggregated to make it easier for the
-                    % user to use
+% some stats are aggregated to make it easier for the
+% user to use
 
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%% TODO: Determine which functions require a reply (ok or otherwise)
+%% and decide whether they should be gen_server:cast or call.
+
+%% TODO: Consolidate all functions that have a similar input or output
+
+%% TODO: Data entry needs to be generic, any data that goes into exometer
+%% needs to be registered in metadata in a similar way. although the
+%% metadata does not need constant updating, that is something specific
+%% to exometer
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%% CONSOLE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -68,15 +78,36 @@
 %% Default for show_stat(Arg) is enabled
 show_stat(Arg) ->
   show_stat(Arg, enabled).
+%% are we reading the data from exometer? or metadata, preferably
+%% the metadata as all the exometer options are dependant on the metadata
 
 %% Show disabled stats
 show_stat(Arg, Status) ->
   gen_server:cast(?SERVER, {show, Arg, Status}).
 
+%% the ability to see the stats that are disabled is easier to see how
+%% many stats are not necessary or outdated. the vclocks on the stats
+%% will show how old they are and if a stat is not used in a long time
+%% it can be removed.
 
+%% TODO: talk about where we want to keep the stats?
+%% TODO: putting the stats themselves in the config could help with removing
+%% TODO: and adding stats in future without having to update the code.
+%% registering a stat for that specific module will be pulling the stats
+%% out of the config which can be changed, if that config itself is
+%% kept in the metadata. then when a stat needs to be added it can be
+%% done so in a function right here. or removed, it will then be
+%% persisted, removed forever? or put in the recycle bin?
 
-get_stat(App) ->
-  gen_server:cast(?SERVER, {get, App}).
+%% TODO: talk to coxxy and dine about putting stats into config.
+%% if they are removed from config that is stored down to disk they
+%% arent completely lost as riak can be installed again.
+
+%% or instead of putting the stats in config the names can be stored
+%% in caching? then they can be removed from caching?
+%% however then there would need to be functionality that the
+%% caching will also have to read from the metadata which stats to cache.
+
 
 %TODO: SPEC
 get_stats(Name, DataPoint) ->
@@ -86,6 +117,9 @@ stat_info(Arg) ->
   {Attrs, RestArg} = pick_info_attrs(split_arg(Arg)),
   [print_info(E, Attrs) || E <- find_entries(RestArg, '_')].
 
+%% TODO: consolidate these functions, they can be input in a
+%% similar way and it will reduce code expense
+
 % TODO: SPEC
 info(Name, Info) ->
   gen_server:cast(?SERVER, {info, Name, Info}).
@@ -93,6 +127,8 @@ info(Name, Info) ->
 %% TODO: function to enable/disable specific stat types (by mod name)
 stat_change(Arg, ToStatus) ->
   gen_server:cast(?SERVER, {change_status, Arg, ToStatus}).
+%% change it in the metadata first, this should be a gen_server call
+%% as it will require a response to say it has done.
 
 
 reset_stat(Arg) ->
@@ -103,15 +139,35 @@ reset_stat(_Mod, N) ->
   %% TODO: do gen_server call, fo exom and meta
   %% TODO: also update metadata with number of resets
   riak_stat_exom_mgr:reset(N).
+%% Update the metadata when a stat is reset
+%% A stat is reset either manually, or when a node is restarted and
+%% re-registers the stat, it will inadvertantly keep track of the times
+%% a node has been restarted,
+%%
+%% however if the node goes down continuously all the stats will have the
+%% reset counter updated on resets continuously
+%%
+%% If instead the number of resets when the node restarts, it acts as
+%% a stat itself, and it doesn't store the same number 500 times in the
+%% metadata.
+
 
 delete_stat(Arg) ->
   gen_server:cast(?SERVER, {delete, Arg}). % TODO: write the function
+
+%% completely erase it from the metadata and the exometer,
+%% maybe store in cache the stats that have been deleted, as they can be
+%% removed from the code if they are no longer useful or required
 
 % TODO: spec, "method.lww", "priority.metadata"
 stat_opts(Name, Item) ->
   % metadata -> meta,
   % exometer -> exom
   gen_server:cast(?SERVER, {options, Name, Item}).
+%% lww will compare the vclocks and then keep the youngest option,
+%% the other option is metadata | exometer, as it will then choose which
+%% stat to keep based on priority
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%% STORING %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -127,12 +183,8 @@ new_register(App, Name, Arg) ->
 update(App, Name, UpdateVal, Type) ->
   gen_server:call(?SERVER, {update, App, Name, UpdateVal, Type}).
 
-
-%TODO: --spec
-update_stats(App, Metric, Value, Arg) ->
-  gen_server:cast(?SERVER, {update, App, Metric, Value, Arg}).
-
-
+get_stat(App) ->
+  gen_server:cast(?SERVER, {get, App}).
 
 %%%% METADATA %%%%
 
@@ -145,15 +197,13 @@ update_stats(App, Metric, Value, Arg) ->
 %% TODO: set meta opts
 
 
-%%%% EXOM %%%%
+%%%% TEST %%%%
 
 start() ->
   riak_stat_exom_mgr:start().
 
 stop() ->
   riak_stat_exom_mgr:stop().
-
-
 
 
 %TODO SPEC
@@ -181,9 +231,6 @@ unregister_stats(Module, Index, Type, App) ->
 % tODO: spec
 vnodeq_atom(Service, Desc) ->
   binary_to_atom(<<(atom_to_binary(Service, latin1))/binary, Desc/binary>>, latin1).
-
-
-
 
 
 %TOdo: Spec
@@ -251,14 +298,20 @@ handle_call({register, App, Stats}, _From, State) ->
   {reply, ok, State};
 handle_call({update, App, Name, Arg}, _From, State) ->
   StatName = stat_name(prefix(), App, Name),
-  riak_stat_exom_mgr:update(StatName, Arg),
-  {reply, ok, State};
+  Reply =
+    case riak_stat_exom_mgr:update(StatName, Arg) of
+      {error, not_found} ->
+        lager:debug("~p not found on update.~n", [Name]);
+      ok ->
+        ok
+    end,
+  {reply, Reply, State};
 handle_call({new_stat, App, Name, Arg}, _From, State) ->
   StatName = stat_name(prefix(), App, Name),
   riak_stat_exom_mgr:register_stat(StatName, Arg),
   {reply, ok, State};
 handle_call({update, App, Name, UpdateVal, Type}, _From, State) ->
-  StatName  = stat_name(prefix(), App, Name),
+  StatName = stat_name(prefix(), App, Name),
   riak_stat_exom_mgr:update_or_create(StatName, UpdateVal, Type),
   {reply, ok, State};
 
@@ -312,7 +365,7 @@ handle_cast({unregister, Module, Index, Type, App}, State) ->
   riak_stat_exom_mgr:delete([prefix(), App, Type, Module, Index]),
   % TODO: unregister from metadata (call helper)
   {noreply, State};
-handle_cast({change_status, Arg, ToStatus}, State=#state{priority = Pr}) ->
+handle_cast({change_status, Arg, ToStatus}, State = #state{priority = Pr}) ->
   lists:foreach(
     fun({[{LP, []}], _}) ->
       io:fwrite(
@@ -347,10 +400,10 @@ handle_cast({reset, Arg}, State) ->
         "== ~s (Legacy pattern): No matching stats ==~n", [LP]);
       ({[{LP, Matches}], _}) ->
         io:fwrite("== ~s (Legacy pattern): ==~n", [LP]),
-        [io:fwrite("~p: ~p~n", [N, riak_stat_meta_mgr:reset_stat(core,N)])
+        [io:fwrite("~p: ~p~n", [N, riak_stat_meta_mgr:reset_stat(core, N)])
           || {N, _} <- Matches];
       ({Entries, _}) ->
-        [io:fwrite("~p: ~p~n", [N, riak_stat_meta_mgr:reset_stat(core,N)])
+        [io:fwrite("~p: ~p~n", [N, riak_stat_meta_mgr:reset_stat(core, N)])
           || {N, _, _} <- Entries]
     end, find_entries(Arg, enabled)),
   {noreply, State};
@@ -390,15 +443,6 @@ handle_cast({aliases, Type, Arg}, State) ->
   {noreply, State};
 handle_cast({path, Path}, State) ->
   riak_stat_exom_mgr:get_values(Path),
-  {noreply, State};
-handle_cast({update, App, Metric, Value, Arg}, State) ->
-% TODO: update the metdata
-  case riak_stat_exom_mgr:update([prefix(), App, Metric], Value) of
-    {error, not_found} ->
-      lager:debug("~p not found on update.", [Arg]);
-    ok ->
-      ok
-  end,
   {noreply, State};
 
 
@@ -444,7 +488,7 @@ register_stat(P, App, Stat) ->
     end,
   StatName = stat_name(P, App, Name),
   % TODO: pull out the metadata Opts to pass into exom
-  NewOpts =  register_meta(StatName, Type, Opts, Aliases),
+  NewOpts = register_meta(StatName, Type, Opts, Aliases),
   register_exom(StatName, Type, NewOpts, Aliases).
 
 % TODO: Have update_stats call into this as well
@@ -514,15 +558,15 @@ print_stats(Entries) ->
 
 pick_info_attrs(Arg) ->
   case lists:foldr(
-    fun("-name"     , {As, Ps}) -> {[name     |As], Ps};
-      ("-type"     , {As, Ps}) -> {[type     |As], Ps};
-      ("-module"   , {As, Ps}) -> {[module   |As], Ps};
-      ("-value"    , {As, Ps}) -> {[value    |As], Ps};
-      ("-cache"    , {As, Ps}) -> {[cache    |As], Ps};
-      ("-status"   , {As, Ps}) -> {[status   |As], Ps};
-      ("-timestamp", {As, Ps}) -> {[timestamp|As], Ps};
-      ("-options"  , {As, Ps}) -> {[options  |As], Ps};
-      (P, {As, Ps}) -> {As, [P|Ps]}
+    fun("-name", {As, Ps}) -> {[name | As], Ps};
+      ("-type", {As, Ps}) -> {[type | As], Ps};
+      ("-module", {As, Ps}) -> {[module | As], Ps};
+      ("-value", {As, Ps}) -> {[value | As], Ps};
+      ("-cache", {As, Ps}) -> {[cache | As], Ps};
+      ("-status", {As, Ps}) -> {[status | As], Ps};
+      ("-timestamp", {As, Ps}) -> {[timestamp | As], Ps};
+      ("-options", {As, Ps}) -> {[options | As], Ps};
+      (P, {As, Ps}) -> {As, [P | Ps]}
     end, {[], []}, Arg) of
     {[], Rest} ->
       {[name, type, module, value, cache, status, timestamp, options], Rest};
@@ -543,12 +587,12 @@ print_info({[], _}, _) ->
   io_lib:fwrite("No matching stats~n", []);
 print_info({Entries, _}, Attrs) ->
   lists:foreach(
-    fun({N,_,_}) ->
+    fun({N, _, _}) ->
       print_info_1(N, Attrs)
     end, Entries).
 
 
-print_info_1(N, [A|Attrs]) ->
+print_info_1(N, [A | Attrs]) ->
   Hdr = lists:flatten(io_lib:fwrite("~p: ", [N])),
   Pad = lists:duplicate(length(Hdr), $\s),
   Info = riak_stat_meta_mgr:info_stat(core, N),
@@ -564,7 +608,7 @@ print_info_1(N, [A|Attrs]) ->
   io:put_chars([Hdr, Body]).
 
 split_arg([Str]) ->
-  re:split(Str, "\\s", [{return,list}]).
+  re:split(Str, "\\s", [{return, list}]).
 
 
 find_entries(exom, Arg) ->
@@ -617,7 +661,6 @@ change_status(Mod, Name, ToStatus) ->
 %% restarts, value is automatically enabled.
 
 
-
 %% TODO: helper function for unregistering stats
 
 %% TODO: helper for meta key
@@ -628,7 +671,6 @@ change_status(Mod, Name, ToStatus) ->
 %%%===================================================================
 %%% Update stats
 %%%===================================================================
-
 
 
 %%%===================================================================

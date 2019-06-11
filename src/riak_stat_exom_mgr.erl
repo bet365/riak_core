@@ -40,11 +40,7 @@
 % TODO: update helper functions
 
 
-start() ->
-  exometer:start().
 
-stop() ->
-  exometer:stop().
 
 
 find_entries(Arg) ->
@@ -67,7 +63,7 @@ register_stat(Name, Type) ->
 
 update(Arg, Value) ->
   exometer:update(Arg, Value).
-
+%% TODO: give explanation for why a different update and update_or_create
 update_or_create(Name, UpdateVal, Type) ->
   exometer:update_or_create(Name, UpdateVal, Type, []).
 
@@ -158,11 +154,21 @@ delete(Arg) ->
 
 
 
+%% Testing
+start() ->
+  exometer:start().
+
+stop() ->
+  exometer:stop().
 
 
 %%%-------------------------------------------------------------------
 %%% exometer - folsom
 %%%-------------------------------------------------------------------
+
+
+%% TODO: move everything towards exometer, remove all the folsom functions
+
 
 get_datapoints(Name, Type) ->
   get_datapoints(Name, Type, []).

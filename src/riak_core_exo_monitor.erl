@@ -30,7 +30,7 @@ behaviour() ->
     entry.
 
 copy_folsom(Name, Type, Opts) when is_tuple(Name) ->
-    Prefix = riak_core_stat:prefix(),
+    Prefix = riak_stat_mngr:prefix(),
     {[Prefix|tuple_to_list(Name)], ad_hoc, [{folsom_name, Name},
 					    {module, ?MODULE},
 					    {type, Type}

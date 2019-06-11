@@ -1,12 +1,22 @@
 %%%-------------------------------------------------------------------
 %%% @copyright (C) 2019, <COMPANY>
 %%% @doc
-%%% Helper module for riak_stat_mgr.
+%%%
+%%% June 2019 update ->
+%%%   Long winded functions
+%%%   Functions used by many mngr modules
+%%%   Commonly used functions are consolidated in this module.
 %%%
 %%% @end
 %%% Created : 05. Jun 2019 13:31
 %%%-------------------------------------------------------------------
 -module(riak_stat_assist_mgr).
+
+%% TODO: generalise the functions below, so they can be used for both
+%% TODO: metadata and exometer.
+
+%% TODO: Modernise the code, pull out outdated functions and replace with
+%% TODO: quicker more generalised functions.
 
 %% API
 -export([find_entries/2, find_meta_entries/2]).
