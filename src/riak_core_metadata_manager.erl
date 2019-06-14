@@ -557,8 +557,6 @@ read_merge_write(PKey, Obj, State) ->
     end.
 
 store({FullPrefix, Key}=PKey, Metadata, State) ->
-    lager:info("MetaManager Store PKEY: ~p MD: ~p~n", [PKey, Metadata]),
-    riak_core_metadata_events:metadata_update({PKey, Metadata}),
     _ = maybe_init_ets(FullPrefix),
     maybe_init_dets(FullPrefix, State#state.data_root),
 
@@ -567,6 +565,7 @@ store({FullPrefix, Key}=PKey, Metadata, State) ->
     ets:insert(ets_tab(FullPrefix), Objs),
     riak_core_metadata_hashtree:insert(PKey, Hash),
     ok = dets_insert(dets_tabname(FullPrefix), Objs),
+    riak_core_metadata_events:metadata_update({PKey, Metadata}),
     {Metadata, State}.
 
 read({FullPrefix, Key}) ->

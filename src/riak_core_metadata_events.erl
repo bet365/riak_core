@@ -20,9 +20,6 @@
 	add_sup_callback/1,
 	add_guarded_callback/1,
 	metadata_update/1
-%%	force_update/0,
-%%	ring_sync_update/1,
-%%	force_sync_update/0
 ]).
 
 %% gen_event callbacks
@@ -56,19 +53,8 @@ add_sup_callback(Fn) when is_function(Fn) ->
 add_guarded_callback(Fn) when is_function(Fn) ->
 	riak_core:add_guarded_event_handler(?MODULE, {?MODULE, make_ref()}, [Fn]).
 
-%%force_update() ->
-%%	{ok, Ring} = riak_core_ring_manager:get_my_ring(),
-%%	ring_update(Ring).
-
 metadata_update(MetaData) ->
 	gen_event:notify(?MODULE, {metadata_update, MetaData}).
-
-%%force_sync_update() ->
-%%	{ok, Ring} = riak_core_ring_manager:get_my_ring(),
-%%	ring_sync_update(Ring).
-
-%%ring_sync_update(Ring) ->
-%%	gen_event:sync_notify(?MODULE, {ring_update, Ring}).
 
 %% ===================================================================
 %% gen_event callbacks
@@ -80,7 +66,6 @@ init([Fn]) ->
 	{ok, #state { callback = Fn }}.
 
 handle_event({metadata_update, MetaData}, State) ->
-	lager:info("Events log message"),
 	(State#state.callback)(MetaData),
 	{ok, State}.
 
