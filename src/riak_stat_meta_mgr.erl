@@ -57,7 +57,7 @@ opts(StatName) ->
   % return that for exometer.
   StatName.
 
-
+reset_inc(Count) -> Count + 1.
 
 
 %% check_stats(all) ->
