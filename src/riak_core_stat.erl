@@ -18,6 +18,10 @@
 %%
 %% -------------------------------------------------------------------
 
+%% June 2019 ->
+%%    redirected all the exometer function calls to go through the stat_mngr
+%%    This is the stat-coordinator for all the modules in riak_core
+
 -module(riak_core_stat).
 
 -behaviour(gen_server).
@@ -58,15 +62,14 @@ register_stats(App, Stats) ->
     riak_stat_mngr:register_stats(App, Stats).
 
 register_vnode_stats(Module, Index, Pid) ->
-  P = prefix(),
   F = fun riak_stat_mngr:vnodeq_atom/2,
-  Stat1 =  {ensure, [P, ?APP, vnodes_running, Module],
+  Stat1 =  {[vnodes_running, Module],
     { function, exometer, select_count,
-      [[{ {[P, ?APP, vnodeq, Module, '_'], '_', '_'},
+      [[{ {[vnodeq, Module, '_'], '_', '_'},
         [], [true] }]], match, value },
     [{aliases, [{value, F(Module, <<"s_running">>)}]}]},
 
-  Stat2 = {ensure, [P, ?APP, vnodeq, Module],
+  Stat2 = {[vnodeq, Module],
     {function, riak_core_stat, vnodeq_stats, [Module],
       histogram, [mean,median,min,max,total]},
     [{aliases, [{mean  , F(Module, <<"q_mean">>)},
@@ -75,12 +78,12 @@ register_vnode_stats(Module, Index, Pid) ->
       {max   , F(Module, <<"q_max">>)},
       {total , F(Module, <<"q_total">>)}]}]},
 
-  Stat3 = {re_register, [P, ?APP, vnodeq, Module, Index],
+  Stat3 = {[vnodeq, Module, Index],
     function, [{ arg, {erlang, process_info, [Pid, message_queue_len],
       match, {'_', value} }}]},
 
   RegisterStats = [Stat1, Stat2, Stat3],
-    riak_stat_mngr:register_vnode_stats(RegisterStats).
+    riak_stat_mngr:register_vnode_stats(?APP, RegisterStats).
 
 unregister_vnode_stats(Module, Index) ->
     riak_stat_mngr:unregister_stats(Module, Index, vnodeq, ?APP).
@@ -91,8 +94,8 @@ unregister_vnode_stats(Module, Index) ->
 get_stats() ->
     get_stats(?APP).
 
-get_stats(App) ->
-    riak_stat_mngr:get_stat(App).
+get_stats(App) -> % can also be the stat name instead of App
+    riak_stat_mngr:get_stats(App).
 
 get_value(Stat) ->
   riak_stat_mngr:get_value(Stat).
@@ -113,7 +116,7 @@ handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
 handle_cast({update, Arg}, State) ->
-  riak_stat_mngr:update_stats(?APP, update_metric(Arg), update_value(Arg)),
+  riak_stat_mngr:update_or_create(?APP, update_metric(Arg), update_value(Arg), update_type(Arg)),
     {noreply, State};
 handle_cast(_Req, State) ->
     {noreply, State}.
@@ -139,6 +142,13 @@ update_value(rebalance_timer_begin) -> timer_start;
 update_value(converge_timer_end   ) -> timer_end;
 update_value(rebalance_timer_end  ) -> timer_end;
 update_value(_) -> 1.
+
+
+update_type(converge_timer_begin ) -> duration;
+update_type(converge_timer_end   ) -> duration;
+update_type(rebalance_timer_begin) -> duration;
+update_type(rebalance_timer_end  ) -> duration;
+update_type(_) -> undefined.
 
 %% private
 stats() ->

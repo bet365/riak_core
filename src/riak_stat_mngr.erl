@@ -30,12 +30,11 @@
 % will show stats most useful for that profile.
 
 
-
 %%% MANAGER
 
 % Todo: organise the exports into the write exports sections
 
-% Todo: consolidate functions that are similar
+% Todo: consolidate functions that are similar /
 
 % Todo: move all generic functions into the assistant manager, data that
 % goes into exometer needs to go into the metadata in a similar way, only
@@ -99,35 +98,35 @@
 % Todo: write a function that checks the exometer status
 
 
-
 %%%%%% END TODO %%%%%
-
 
 
 %%%%%% EXPORTED FUNCTIONS %%%%%%
 
 -export([
-  register_profiles/0, register_stats/4, set_method/1,
+  register_stats/2, get_stats/1, update_or_create/4,
+  get_datapoint/2, register_profiles/0, set_method/1,
   add_profile/1, add_profile/2, add_profile_stat/2,
-  remove_profile/1, remove_profile_stat/2]).
+  remove_profile/1, remove_profile_stat/2
+]).
 
 %% API riak_core_console
 -export([
-  show_stat/1, show_stat/2, stat0/1, disable0/1,
+  show_stat/2, stat0/1, disable0/1,
   get_stats/2, stat_info/1, info/2, stat_change/2,
   reset_stat/1, reset_stat/2, delete_stat/1, stat_opts/2
 ]).
 
 % API riak_stat_meta_mgr
 -export([
-  register_meta_stats/4, check_meta/1, check_meta_info/1,
+  register_meta_stats/4, check_meta_status/1, check_meta_info/1,
   delete_meta_stat/1, reset_meta_stat/1, set_meta_opts/2
 ]).
 
 % API riak_stat_exom_mgr
 -export([
-  register_exom_stats/4, update_exom_stats/3, check_exom/1,
-  check_exom_info/1, delete_exom_stat/1, reset_exom_stat/1,
+  register_exom_stats/4, update_exom_stats/3, update_exom_stats/4,
+  check_exom/1, check_exom_info/1, delete_exom_stat/1, reset_exom_stat/1,
   set_exom_opts/2
 ]).
 
@@ -139,15 +138,14 @@
 
 % need organising API
 -export([
-  change_status/3, register_stat/3,  register_vnode_stats/1,
+  change_status/3, register_stat/3, register_vnode_stats/2,
   alias/1, aliases/2, get_values/1, get_value/1,
   unregister_stats/4, vnodeq_atom/2, show_pats/1,
   prefix/0, get_datapoints/2, get_datapoints/3, get_val_fol/4,
   get_fol_val/1, notify/3, start/0, stop/0,
-  delete_metric/1, counter/1, history/2, gauge/1,
-  register_stats/2, update_stats/3, new_register/3, update/4,
-  get_stat/1
-]).
+  delete_metric/1, counter/1, history/2, gauge/1
+
+  ]).
 
 -export([start_link/0]).
 %% gen_server callbacks
@@ -166,11 +164,11 @@
 %%%%% RECORDS %%%%%
 -record(state, {
   method = lww,     % lww is the default
-  profiles = orddict:new(), % profiles that include the {Profile, [Stats]}
+  profiles, % profiles that include the {Profile, [Stats]}
   aggr = false}).     % default decision for stats, turn aggregation off.
 
 
-%%%%% DOCUMENTATION %%%%%
+%%%%% @doc %%%%%
 
 %% #state{} =>
 %% method -- lww | metadata | exometer
@@ -185,7 +183,7 @@
 %%                  "riak-admin stat info, riak.**..." as it holds all
 %%                  the stats information.
 %%
-%% profiles -- orddict of the stats that are needed fot that specific
+%% profiles -- ets of the stats that are needed fot that specific
 %%           profile, for example, a stress testing profile for puts
 %%           to the vnode will only need a couple stats enabled, doing
 %%           riak-admin stat enable-profile stress-puts will enable all
@@ -200,7 +198,7 @@
 %%         this allows extra functionality to see the specific stats in
 %%         detail automatically.
 %%
-%% .
+%% @end
 
 %%%===================================================================
 %%% API
@@ -208,21 +206,103 @@
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%% GENERAL %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+-spec(register_stats(App :: atom(), Stats :: term()) -> term() | ok).
+%% @doc
+%% All stats that get registered go through metadata first, the status
+%% of the stats already registered is checked and returned to exometer
+%%
+%% Exometer will register the stats and enable them automatically,
+%% pulling the status from the metadata and placing it into the options
+%% given to exometer can set the status when it is registered.
+%% preventing the stats having to be manually enabled/disabled on
+%% start up.
+%% @end
+register_stats(App, Stats) ->
+  gen_server:call(?SERVER, {register, App, Stats}).
+
+-spec(register_vnode_stats(App :: atom(), Stats :: list()) -> ok | term()).
+%% @doc
+%% vnode stats are from riak_core_stat and require a different type of
+%% registration
+%% @end
+register_vnode_stats(App, Stats) ->
+  gen_server:cast(?SERVER, {vnode_stats, App, Stats}).
+
+-spec(get_stats(App :: atom()) -> term()).
+%% @doc
+%% In riak attach the function get_stats() can be called to retrieve all
+%% the stats that is registered to that particular app.
+%%
+%% get_stats/1 can be used to retrieve stats in a particular path not just app.
+%% @end
+get_stats(App) ->
+  gen_server:call(?SERVER, {get_app_stats, App}).
+
+-spec(get_datapoint(Name :: list() | term(), DataPoint :: term()) -> term()).
+%% @doc
+%% Retrieve the current value of a stat from exometer.
+%% @end
+get_datapoint(Name, DataPoint) ->
+  gen_server:call(?SERVER, {get_datapoint, Name, DataPoint}).
+
+-spec(get_value(Stat :: list()) -> ok | term()).
+%% @doc
+%% Same as the function above, except in exometer the Datapoint:
+%% 'default' is inputted, however it is used by some modules
+%% @end
+get_value(Stat) ->
+  riak_stat_exom_mgr:get_value(Stat).
+
+-spec(get_values(Path :: list() | term()) -> term()).
+%% @doc
+%% get the values from exometer using the Path provided.
+%% @end
+get_values(Path) ->
+  riak_stat_exom_mgr:get_values(Path).
+
+-spec(update_or_create(App :: atom(), Name :: term(), UpdateVal :: term(), Type :: atom()) ->
+  term() | ok).
+%% @doc
+%% Updates the Stats by a specific value given, unless the value does not
+%% exists then it creates the stat in exometer. It calls the update/2 in
+%% exometer, hence why the update_stats function was removed.
+%% @end
+update_or_create(App, Name, UpdateVal, Type) ->
+  gen_server:call(?SERVER, {update, App, Name, UpdateVal, Type}).
+
+-spec(unregister_stats(Module :: atom() | list(), Index :: term(),
+    Type :: atom() | term(), App :: atom() | term()) -> ok | term()).
+%% @doc
+%% Un-registering the stats deletes them from exometer and leaves the
+%% stat in exometer with the Option: {unregistered, true},
+%% upon re_registering again the the stat will be ignored unless the
+%% option for unregistered is set manually to 'false' in the metadata.
+%% @end
+unregister_stats(Module, Index, Type, App) ->
+  gen_server:call(?SERVER, {unregister, Module, Index, Type, App}).
+
+%%% DEFAULTS %%%
+
+-spec(set_method(Method :: (metadata | exometer | lww)) -> ok).
+%% @doc
+%% Set the default method in which the data should be written.
+%% default is lww, which checks/writes to both exometer and the
+%% metadata, returning the option with the youngest time.
+%% @end
+set_method(Method) ->
+  gen_server:call(?SERVER, {method, Method}).
+
+
+
+%%%%%%%%%% PROFILES %%%%%%%%%%%
+
+%% TODO This last
 % register profiles in the orddict into metadata
 -spec(register_profiles() -> ok).
 register_profiles() ->
   gen_server:call(?SERVER, profiles).
 
-% register_stats into exometer and metadata
--spec(register_stats(StatName :: list(), Type :: atom(), Opts :: list(), Aliases :: term()) ->
-  term() | ok | {error, Reason}).
-register_stats(StatName, Type, Opts, Aliases) ->
-  gen_server:call(?SERVER, {register, StatName, Type, Opts, Aliases}).
 
-% set the default method
--spec(set_method(Method :: (metadata | exometer | lww)) -> ok).
-set_method(Method) ->
-  gen_server:call(?SERVER, {method, Method}).
 
 %% "riak-admin stat add-profile stress-puts riak.riak_kv.vnode.puts.**"
 
@@ -233,7 +313,7 @@ add_profile(ProfileName) ->
 -spec(add_profile(ProfileName :: term(), Stats :: list()) -> term() | ok).
 add_profile(ProfileName, Stats) ->
   gen_server:call(?SERVER, {add_profile, ProfileName, Stats}). % add to orddict
-  % register in metadata
+% register in metadata
 
 % add a stat to the list in the profile
 -spec(add_profile_stat(ProfileName :: atom(), Stat :: list()) -> term() | ok).
@@ -250,40 +330,21 @@ remove_profile(ProfileName) ->
 remove_profile_stat(ProfileName, Stat) ->
   gen_server:call(?SERVER, {remove_profile_stat, ProfileName, Stat}).
 
+
+%%% End TODO %%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
--spec(register_stats(App :: atom(), Stats :: term()) -> term() | ok).
-register_stats(App, Stats) ->
-  % handle call will do the check and regiter in meta and exom
-  gen_server:call(?SERVER, {register, App, Stats}).
-
--spec(update_stats(App :: atom(), Name :: term(), Arg :: term()) -> term() | ok).
-update_stats(App, Name, Arg) ->
-  gen_server:call(?SERVER, {update, App, Name, Arg}).
-
--spec(new_register(App :: atom(), Name :: term(), Arg :: term()) -> term() | ok ).
-new_register(App, Name, Arg) ->
-  gen_server:call(?SERVER, {new_stat, App, Name, Arg}).
-
--spec(update(App :: atom(), Name :: term(), UpdateVal :: term(), Type :: atom()) -> term() | ok).
-update(App, Name, UpdateVal, Type) ->
-  gen_server:call(?SERVER, {update, App, Name, UpdateVal, Type}).
-
--spec(get_stat(App :: atom()) -> term()).
-get_stat(App) ->
-  gen_server:cast(?SERVER, {get, App}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%% CONSOLE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
--spec(show_stat(Arg :: term()) -> term()).
-%% Default for show_stat(Arg) is enabled
-show_stat(Arg) ->
-  show_stat(Arg, enabled).
-
 -spec(show_stat(Arg :: term(), Status :: atom()) -> term()).
+%% @doc
 %% Show enabled or disabled stats
+%% when using riak-admin stat show riak.** enabled stats will show by default
+%%
+%% otherwise use: riak-admin stat show-enabled | show-disabled
+%% @end
 show_stat(Arg, Status) ->
-  gen_server:cast(?SERVER, {show, Arg, Status}).
+  gen_server:call(?SERVER, {show, Arg, Status}).
 
 % Check which stats haven't been updated during testing etc...,
 % return the list of enabled stats
@@ -332,12 +393,17 @@ stat_opts(Name, Item) ->
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%% METADATA %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% register stats in the metadata
 -spec(register_meta_stats(Statname :: term(), Type :: atom(), Opts :: list(), Aliases :: term()) ->
-  term() | ok).
+  term() | ok | {error, Reason}).
+%% @doc
+%% registers the stats in metadata if they aren't already there, If they are
+%% there it returns the status options for exometer to put.
+%%
+%% If a stat has the option {unregistered, true} it will return 0, which will
+%% be ignored going into exometer.
+%% @end
 register_meta_stats(Statname, Type, Opts, Aliases) ->
   riak_stat_meta_mgr:register_stat(Statname, Type, Opts, Aliases).
-% todo: make register_stat -> register, more generic
 
 % register the profiles into meta data
 -spec(register_meta_profiles(ProfileName :: atom(), StatList :: list()) ->
@@ -346,62 +412,82 @@ register_meta_profiles(ProfileName, StatList) ->
   riak_stat_meta_mgr:register(ProfileName, StatList).
 
 % return the status of the stat, similar to " riak-admin stat show"
--spec(check_meta(StatName :: term()) -> term() | {error, Reason}).
-check_meta(Statname) ->
-  % gen_server:call(
-  riak_stat_meta_mgr:check(Statname).
+-spec(check_meta_status(StatName :: term()) -> term() | {error, Reason}).
+%% @doc
+%% Checks the status that is in the metadata
+%% @end
+check_meta_status(Statname) ->
+  riak_stat_meta_mgr:check_status(Statname).
 
 % return all the info on the stat in meta, like "riak-admin stat info"
 -spec(check_meta_info(StatName :: term()) -> term() | {error, Reason}).
 check_meta_info(Statname) ->
   % gen_server:call(
-  riak_stat_meta_mgr:info(Statname).
+  riak_stat_meta_mgr:check_meta_info(Statname).
 
-% deletes the stat entry from the metadata
 -spec(delete_meta_stat(StatName :: term()) -> term() | ok | {error, Reason}).
+%% @doc
+%% Marks the meta data of a stat as unregistered, deleting the stat from the
+%% metadata will mean upon node restarting it will re_register. This option
+%% prevents this from happening and keeps a record of the stats history
+%% @end
 delete_meta_stat(Statname) ->
-  % gen_server:call(
-  riak_stat_meta_mgr:delete(Statname).
+  riak_stat_meta_mgr:unregister(Statname).
 
 % resets the options and additional values back to the default
 -spec(reset_meta_stat(StatName :: term()) -> term() | ok | {error, Reason}).
 reset_meta_stat(Statname) ->
   % gen-server:call(
-  riak_stat_meta_mgr:reset_stat(Statname ,[]).
+  riak_stat_meta_mgr:reset_stat(Statname, []).
 
-% set the options for the stat or stats, default options are added on registration
 -spec(set_meta_opts(StatName :: term(), Opts :: list()) -> term() | ok | {error, Reason}).
+%% @doc
+%% Set the options (values) in the metadata manually
+%% {status, Status}     -> Status :: enabled | disabled
+%% {unregistered, Bool} -> Bool :: boolean()
+%% @end
 set_meta_opts(Statname, Opts) ->
-  % gen_server:call(
-  riak_stat_meta_mgr:set_opts(Statname, Opts). % lists:keyreplace
+  riak_stat_meta_mgr:set_options(Statname, Opts).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%% EXOMETER %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% register the stats in exometer
 -spec(register_exom_stats(StatName :: list(), Type :: atom(), Opts :: list(), Aliases :: list()) ->
   term() | ok | {error, Reason}).
+%% @doc
+%% register the stats in exometer
+%% @end
 register_exom_stats(Statname, Type, Opts, Aliases) ->
   riak_stat_exom_mgr:register_stat(Statname, Type, Opts, Aliases).
 
-% update the stats in exometer
--spec(update_exom_stats(App :: atom(), Name :: term(), Arg :: term()) -> term() | ok | {error, Reason}).
-update_exom_stats(App, Name, Arg) ->
-  riak_stat_exom_mgr:update(App, Name, Arg).
+-spec(update_exom_stats(StatName :: atom() | list(), UpdateVal :: term(),
+    Type :: atom() | term()) -> term() | ok | {error, Reason}).
+update_exom_stats(StatName, UpdateVal, Type) ->
+  update_exom_stats(StatName, UpdateVal, Type, []).
+
+-spec(update_exom_stats(StatName :: atom() | list(), UpdateVal :: term(),
+    Type :: atom() | term(), Opts :: list() | tuple()) -> ok | {error, Reason} | term()).
+update_exom_stats(StatName, UpdateVal, Type, Opts) ->
+  riak_stat_exom_mgr:update_or_create(StatName, UpdateVal, Type, Opts).
 
 % similar to "riak-admin stat show"
 -spec(check_exom(Statname :: list()) -> term() | ok | {error, Reason}).
 check_exom(Statname) ->
+  % TODO: use ensure?
   riak_stat_exom_mgr:check(Statname).
 
 % similar to "riak-admin stat info"
 -spec(check_exom_info(StatName :: term()) -> term() | ok | {error, Reason}).
 check_exom_info(Statname) ->
+  %
   riak_stat_exom_mgr:info(Statname).
 
-% delete the stat from exometer, also updates the stat in metadata as deleted
 -spec(delete_exom_stat(StatName :: term()) -> term() | ok | {error, Reason}).
+%% @doc
+%% Delete the stat form exometer, after the stat is marked as unregistered in
+%% metadata
+%% @end
 delete_exom_stat(Statname) ->
-  riak_stat_exom_mgr:delete(Statname).
+  riak_stat_exom_mgr:unregister_stat(Statname).
 
 % reset the stat in exometer back to the defaults
 -spec(reset_exom_stat(StatName :: term()) -> term() | ok | {error, Reason}).
@@ -412,9 +498,9 @@ reset_exom_stat(Statname) ->
 -spec(set_exom_opts(StatName :: term(), Opts :: list()) -> term() | ok | {error, Reason}).
 set_exom_opts(Statname, Opts) ->
   riak_stat_exom_mgr:set_opts(Statname, Opts). % this will be called during registration
-  % this checks the method, if the default is metadata then it will set the options from there
-  % if it is exometer it will have exometers default opts
-  % if it is lww then it is comparing the youngest.
+% this checks the method, if the default is metadata then it will set the options from there
+% if it is exometer it will have exometers default opts
+% if it is lww then it is comparing the youngest.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%% CACHING %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -434,8 +520,7 @@ start() ->
 stop() ->
   riak_stat_exom_mgr:stop().
 
-register_vnode_stats(Stats) ->
-  gen_server:cast(?SERVER, {vnode_stats, Stats}).
+
 
 alias(Arg) ->
   gen_server:cast(?SERVER, {alias, Arg}).
@@ -443,14 +528,7 @@ alias(Arg) ->
 aliases(Type, Args) ->
   gen_server:cast(?SERVER, {aliases, Type, Args}).
 
-get_value(Stat) ->
-  riak_stat_exom_mgr:get_value(Stat).
 
-get_values(Path) ->
-  gen_server:cast(?SERVER, {path, Path}).
-
-unregister_stats(Module, Index, Type, App) ->
-  gen_server:cast(?SERVER, {unregister, Module, Index, Type, App}).
 
 vnodeq_atom(Service, Desc) ->
   binary_to_atom(<<(atom_to_binary(Service, latin1))/binary, Desc/binary>>, latin1).
@@ -525,36 +603,75 @@ init([]) ->
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
   {stop, Reason :: term(), NewState :: #state{}}).
-handle_call(profiles, _From, State = #state{profiles = Profiles}) ->
-  orddict:map(fun(ProfileName, StatList) ->
-    register_meta_profiles(ProfileName, StatList)
-              end, Profiles),
-  {reply, ok, State};
+
+%%% GENERAL %%%
 
 handle_call({register, App, Stats}, _From, State) ->
   lists:foreach(fun(Stat) ->
     register_stat(prefix(), App, Stat)
                 end, Stats),
   {reply, ok, State};
-handle_call({update, App, Name, Arg}, _From, State) ->
+handle_call({vnode_stats, App, Stats}, _From,  State) ->
+  lists:foreach(fun
+                  ({Stat, Type, Alias}) ->
+                    register_stats(App, [{Stat, Type, [], Alias}]);
+                  ({Stat, Type}) ->
+                    register_stats(App, [{Stat, Type}])
+                end, Stats),
+  {reply, ok, State};
+handle_call({get_app_stats, App}, _From,  State) ->
+  Values = get_values([prefix(), App]),
+  {reply, Values, State};
+handle_call({update, App, Name, UpdateVal, Type}, _From, State) ->
   StatName = stat_name(prefix(), App, Name),
   Reply =
-    case riak_stat_exom_mgr:update(StatName, Arg) of
-      {error, not_found} ->
-        lager:debug("~p not found on update.~n", [Name]);
-      ok ->
+    case check_meta_info(StatName) of
+      undefined ->
+        register_meta_stats(StatName, Type, [], []),
+        update_exom_stats(StatName, UpdateVal, Type),
+        ok;
+      {{_NI, _S}, StatName, {Type, Opts, _Aliases}} ->
+        update_exom_stats(StatName, UpdateVal, Type, Opts),
         ok
     end,
   {reply, Reply, State};
-handle_call({new_stat, App, Name, Arg}, _From, State) ->
-  StatName = stat_name(prefix(), App, Name),
-  riak_stat_exom_mgr:register_stat(StatName, Arg),
-  {reply, ok, State};
-handle_call({update, App, Name, UpdateVal, Type}, _From, State) ->
-  StatName = stat_name(prefix(), App, Name),
-  riak_stat_exom_mgr:update_or_create(StatName, UpdateVal, Type),
-  {reply, ok, State};
+handle_call({get_datapoint, Name, DataPoint}, _From, State) ->
+  Value =
+    riak_stat_exom_mgr:get_datapoint(Name, DataPoint),
+  {reply, Value, State};
+handle_call({unregister, Mod, Index, Type, App}, _From, State) ->
+  Reply = unreg_stats(App, Type, Mod, Index),
+  {reply, Reply, State};
+handle_call({method, Method}, _From, State = #state{}) ->
+  Method0 = method(Method),
+  {Response, Arg} =
+    case Method0 of
+      metadata -> {"Method changed to ~p as default~n", Method0};
+      exometer -> {"Method changed to ~p as default~n", Method0};
+      lww -> {"Method changed to ~p as default~n", Method0};
+      _ -> {"Invalid method given~n", []}
+  end,
+  Reply = io:fwrite(Response, [Arg]),
+  {reply, Reply, State#state{method = Arg}};
 
+%%% CONSOLE %%%
+
+handle_call({show, Arg, Status}, _From, State = #state{}) ->
+  % Todo: discuss the method functionality
+  Arg,
+  {reply, Status, State};
+
+
+
+
+
+
+
+handle_call(profiles, _From, State = #state{profiles = Profiles}) ->
+  orddict:map(fun(ProfileName, StatList) ->
+    register_meta_profiles(ProfileName, StatList)
+              end, Profiles),
+  {reply, ok, State};
 handle_call(_Request, _From, State) ->
   {reply, ok, State}.
 
@@ -575,8 +692,10 @@ handle_call(_Request, _From, State) ->
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
 
+
+
 handle_cast({show, Arg, Status}, State = #state{method = Priority}) ->
-  print_stats(find_entries(Priority, Arg, Status)),
+  print_stat(find_entries(Priority, Arg, Status), []),
   {noreply, State};
 
 handle_cast({info, Name, Item}, State) ->
@@ -599,23 +718,8 @@ handle_cast({info, Name, Item}, State) ->
   %% TODO: check the output of the exom and metadata
   {noreply, State};
 % TODO: add register stats
-handle_cast({vnode_stats, Stats}, State) ->
-  % TODO: add the vnode stats into metadata as well
-  lists:foreach(fun
-                  ({ensure, Stat, Type, Alias}) ->
-                    riak_stat_exom_mgr:ensure(Stat, Type, Alias);
-                  ({re_register, Stat, Type}) ->
-                    riak_stat_exom_mgr:re_register(Stat, Type)
-                end, Stats),
-  {noreply, State};
-handle_cast({unregister, [Op, time], Index, Type, App}, State) ->
-  riak_stat_exom_mgr:delete([prefix(), App, Type, Op, time, Index]),
-  % TODO: unregister from metadata
-  {noreply, State};
-handle_cast({unregister, Module, Index, Type, App}, State) ->
-  riak_stat_exom_mgr:delete([prefix(), App, Type, Module, Index]),
-  % TODO: unregister from metadata (call helper)
-  {noreply, State};
+
+
 handle_cast({change_status, Arg, ToStatus}, State = #state{method = Pr}) ->
   lists:foreach(
     fun({[{LP, []}], _}) ->
@@ -680,12 +784,8 @@ handle_cast({options, Name, Item}, State = #state{method = Method}) ->
         lager:warning("invalid data entry~n")
     end,
   {noreply, NewState};
-handle_cast({get, App}, State) ->
-  riak_stat_exom_mgr:get_values([prefix(), App]),
-  {noreply, State};
-handle_cast({get, Name, DataPoint}, State) ->
-  riak_stat_exom_mgr:get_value(Name, DataPoint),
-  {noreply, State};
+
+
 handle_cast({alias, Arg}, State) ->
   riak_stat_exom_mgr:alias(Arg),
   {noreply, State};
@@ -738,12 +838,13 @@ register_stat(P, App, Stat) ->
       {N, T, Os, As} -> {N, T, Os, As}
     end,
   StatName = stat_name(P, App, Name),
-  % TODO: pull out the metadata Opts to pass into exom
-  NewOpts = register_meta(StatName, Type, Opts, Aliases),
-  register_exom(StatName, Type, NewOpts, Aliases).
+  % Pull out the status of the stat from MetaData
+  NewOpts = register_meta_stats(StatName, Type, Opts, Aliases),
+  register_exom_stats(StatName, Type, NewOpts, Aliases).
 
 % TODO: Have update_stats call into this as well
 
+% Put the prefix and App name in front of every stat name.
 stat_name(P, App, N) when is_atom(N) ->
   stat_name_([P, App, N]);
 stat_name(P, App, N) when is_list(N) ->
@@ -752,43 +853,12 @@ stat_name(P, App, N) when is_list(N) ->
 stat_name_([P, [] | Rest]) -> [P | Rest];
 stat_name_(N) -> N.
 
-register_meta(StatName, Type, Opts, Aliases) ->
-  riak_stat_meta_mgr:register_stat(StatName, Type, Opts, Aliases).
-
-register_exom(StatName, Type, Opts, Aliases) ->
-  riak_stat_exom_mgr:re_register(StatName, Type, Opts),
-  lists:foreach(
-    fun({DP, Alias}) ->
-      riak_stat_exom_mgr:alias(new, [Alias, StatName, DP])
-    end, Aliases).
-
-check_meta(_Mod, _Name, _Opts) ->
-  % TODO: write a function that checks the opts of the stat
-%% we will always check and update the metadata first, mainly because
-%5 if a problem occurs mid-change the value is stored in meta
-
-
-  %%check_meta(Mod, N, Opts) ->
-%%  case riak_core_metadata:get({Mod, ?STAT}, N, Opts) of
-%%    undefined ->
-%%      %% first time changing opts
-%%      riak_core_metadata:put({Mod, ?STAT}, N, Opts),
-%%      Opts;
-%%    Value when Opts == Value ->
-%%      %% changing data to a value already saved in meta
-%%      Value;
-%%    Value when Opts =/= Value ->
-%%      riak_core_metadata:put({Mod, ?STAT}, N, Opts),
-%%      Opts   %% data has been changed, this is the value
-%%  end.
-  ok.
-
 %%%===================================================================
 %%% Stat show/info
 %%%===================================================================
 
-print_stat(Arg) -> % Todo: make the functions for stat info and stat show call this
-  print_stat(Arg, []).
+%%print_stat(Arg) -> % Todo: make the functions for stat info and stat show call this
+%%  print_stat(Arg, []).
 
 
 print_stat([], []) ->
@@ -966,7 +1036,27 @@ change_status(Mod, Name, ToStatus) ->
 %%% Update stats
 %%%===================================================================
 
+method(meta) -> metadata;
+method(exom) -> exometer;
+method(Arg) -> Arg.
 
 %%%===================================================================
 %%% Delete/reset Stats
 %%%===================================================================
+
+unreg_stats(App, Type, [Op, time], Index) ->
+  P = prefix(),
+  unreg_from_both([P, App, Type, Op, time, Index]);
+unreg_stats(App, Type, Mod, Index) ->
+  P = prefix(),
+  unreg_from_both([P, App, Type, Mod, Index]).
+
+unreg_from_both(StatName) ->
+  case delete_meta_stat(StatName) of
+    ok ->
+      delete_exom_stat(StatName);
+    unregistered ->
+      delete_exom_stat(StatName);
+    _ ->
+      lager:debug("riak_stat_mngr:unreg_both -- could not unregister from meta~n")
+  end.

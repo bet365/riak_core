@@ -18,11 +18,16 @@
 %% TODO: Modernise the code, pull out outdated functions and replace with
 %% TODO: quicker more generalised functions.
 
+
+-export([print_status/2]).
 %% API
 -export([find_entries/2, find_meta_entries/2]).
 
 %%% ---- Stat show ---- %%%
 -define(PFX, fun riak_stat_mngr:prefix/0).
+
+print_status(StatName, Status) ->
+  ok.
 
 find_entries(Arg, ToStatus) ->
   lists:map(

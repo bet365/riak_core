@@ -25,6 +25,14 @@
 %%      For each stat that has a key that matches `Path' we calculate the
 %%      current value and return it.
 
+%%  June 2019 ->
+%%      redirected function calls to point to this modules stat-coordinator:
+%%      riak_core_stat. All the modules in this Dep will point to the stat-
+%%      coordinator which will be the one module to communicate the with
+%%      the riak_stat_mngr.
+
+%% --------------------------------------------------------------------
+
 -module(riak_core_stat_q).
 
 -compile(export_all).
