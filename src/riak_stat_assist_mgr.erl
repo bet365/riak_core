@@ -3,7 +3,7 @@
 %%% @doc
 %%%
 %%% June 2019 update ->
-%%%   Long winded functions
+%%%   consolidated Long winded functions
 %%%   Functions used by many mngr modules
 %%%   Commonly used functions are consolidated in this module.
 %%%
@@ -12,23 +12,84 @@
 %%%-------------------------------------------------------------------
 -module(riak_stat_assist_mgr).
 
-%% TODO: generalise the functions below, so they can be used for both
-%% TODO: metadata and exometer.
-
-%% TODO: Modernise the code, pull out outdated functions and replace with
-%% TODO: quicker more generalised functions.
-
-
--export([print_status/2]).
+-export([print_stats/2]).
 %% API
--export([find_entries/2, find_meta_entries/2]).
+-export([find_entries/2]).
 
 %%% ---- Stat show ---- %%%
--define(PFX, fun riak_stat_mngr:prefix/0).
+-define(PFX, riak_stat_mngr:prefix()).
 
-print_status(StatName, Status) ->
-  ok.
 
+-spec(print_stats(Entries :: term(), Attributes :: list() | term()) -> term() | ok).
+%% @doc
+%% Print stats is generic, and used by both stat show and stat info,
+%% Stat info includes all the attributes that will be printed whereas stat show
+%% will pass in an empty list into the Attributes field.
+%% @end
+print_stats([], _) ->
+  io:fwrite("No matching stats~n");
+print_stats({[{LP, []}], _}, _) ->
+  io:fwrite("== ~s (Legacy pattern): No matching stats ==~n", [LP]);
+print_stats({[{LP, Matches}], _}, []) ->
+  io:fwrite("== ~s (Legacy pattern): ==~n", [LP]),
+  [[io:fwrite("~p: ~p (~p/~p)~n", [N, V, E, DP])
+    || {DP, V, N} <- DPs] || {E, DPs} <- Matches];
+print_stats({[{LP, Matches}], _}, Attrs) ->
+  io:fwrite("== ~s (Legacy pattern): ==~n", [LP]),
+  lists:foreach(
+    fun({N, _}) ->
+      print_info_1(N, Attrs)
+    end, Matches);
+print_stats({[], _}, _) ->
+  io_lib:fwrite("No matching stats~n", []);
+print_stats({Entries, DPs}, []) ->
+  [io:fwrite("~p: ~p~n", [E, get_value(E, Status, DPs)])
+    || {E, _, Status} <- Entries];
+print_stats({Entries, _}, Attrs) ->
+  lists:foreach(
+    fun({N, _, _}) ->
+      print_info_1(N, Attrs)
+    end, Entries).
+
+% used to print the entire stat information
+print_info_1(N, [A | Attrs]) ->
+  Hdr = lists:flatten(io_lib:fwrite("~p: ", [N])),
+  Pad = lists:duplicate(length(Hdr), $\s),
+  Info = get_info(core, N),
+  Status = proplists:get_value(status, Info, enabled),
+  Body = [io_lib:fwrite("~w = ~p~n", [A, proplists:get_value(A, Info)])
+    | lists:map(fun(value) ->
+      io_lib:fwrite(Pad ++ "~w = ~p~n",
+        [value, get_value(N, Status, default)]);
+      (Ax) ->
+        io_lib:fwrite(Pad ++ "~w = ~p~n",
+          [Ax, proplists:get_value(Ax, Info)])
+                end, Attrs)],
+  io:put_chars([Hdr, Body]).
+
+get_value(_, disabled, _) ->
+  disabled;
+get_value(E, _Status, DPs) ->
+  case get_datapoint(E, DPs) of
+    {ok, V} -> V;
+    {error, _} -> unavailable
+  end.
+
+get_info(Name, Info) ->
+  riak_stat_mngr:get_info(Name, Info).
+
+aliases(Type, Entries) ->
+  riak_stat_mngr:aliases(Type, Entries).
+
+get_datapoint(Name, DP) ->
+  riak_stat_mngr:get_datapoint(Name, DP).
+
+%%                                       enabled  |  disabled
+-spec(find_entries(Arg :: term()| list(), ToStatus :: atom()) ->
+  ok | term() | {error, Reason}).
+%% @doc
+%% pulls the information of a stat out of exometer
+%% @end
 find_entries(Arg, ToStatus) ->
   lists:map(
     fun(A) ->
@@ -45,16 +106,6 @@ find_entries(Arg, ToStatus) ->
           end
       end
     end, Arg).
-
-  %% TODO: finish writing this function
-find_meta_entries(Arg, ToStatus) ->
-  lists:map(
-    fun(A) ->
-      {S, Type, Status, DPs} = type_status_and_dps(A, ToStatus),
-      case S of
-        "[" ++ _ ->
-          {find_entries_2(S, Type, Status), DPs}
-      end end, Arg).
 
 type_status_and_dps(S, ToStatus) ->
   [S1|Rest] = re:split(S, "/"),
@@ -96,16 +147,10 @@ merge([], DPs) ->
 
 find_entries_1(S, Type, Status) ->
   Patterns = lists:flatten([parse_stat_entry(S, Type, Status)]),
-  riak_stat_exom_mgr:show_stat(Patterns).
-
-
-%% TODO: change the parse for metadata to search the metadata uniquely
-find_entries_2(S, Type, Status) ->
-  Patterns = lists:flatten([parse_stat_entry(S, Type, Status)]),
-  riak_stat_meta_mgr:show_stat(Patterns).
+  riak_stat_mngr:select_stat(Patterns).
 
 parse_stat_entry([], Type, Status) ->
-  {{[riak_stat_mngr:prefix()] ++ '_', Type, '_'}, [{'=:=','$status',Status}], ['$_']};
+  {{[?PFX] ++ '_', Type, '_'}, [{'=:=','$status',Status}], ['$_']};
 parse_stat_entry("*", Type, Status) ->
   parse_stat_entry([], Type, Status);
 parse_stat_entry("[" ++ _ = Expr, _Type, _Status) ->
@@ -228,13 +273,13 @@ make_re(S) ->
   repl(split_pattern(S, [])).
 
 legacy_search_1(N, Type, Status) ->
-  Found = riak_stat_mngr:aliases(regexp_foldr, [N]),
+  Found = aliases(regexp_foldr, [N]),
   lists:foldr(
     fun({Entry, DPs}, Acc) ->
       case match_type(Entry, Type) of
         true ->
           DPnames = [D || {D,_} <- DPs],
-          case riak_stat_mngr:get_stat(Entry, DPnames) of
+          case get_datapoint(Entry, DPnames) of
             {ok, Values} when is_list(Values) ->
               [{Entry, zip_values(Values, DPs)} | Acc];
             {ok, disabled} when Status=='_';
@@ -251,7 +296,7 @@ legacy_search_1(N, Type, Status) ->
 match_type(_, '_') ->
   true;
 match_type(Name, T) ->
-  T == riak_stat_mngr:info(Name, type).
+  T == get_info(Name, type).
 
 zip_values([{D,V}|T], DPs) ->
   {_,N} = lists:keyfind(D, 1, DPs),
@@ -286,52 +331,3 @@ split_pattern(B, Acc) ->
       lists:reverse([B|Acc])
   end.
 
-%% TODO: move the internal funcitons for stat info into this module
-
-%% TODO: move the internal functions for stat enable/disable into this
-
-%% TODO: move the internal functions for stat reset into this module
-
-%% TODO: create functions for stat deletion.
-
-%% TODO: create a function for setting defaults on metadata and exometer?
-%% as in the lww and allow_multi, true sort of thing.
-
-%% TODO: implement a function that will automatically persist data from
-%% exometer into the metadata. include functionality such as once a week/
-%% month/3months etc...?
-
-%% There are stats that are to do with the system info, puts and gets times,
-%% vnode data. there could be stats that are to do with the run time or anythin.
-
-
-%%% ---- Stat compare ---- %%%
-
-%%% compare(stat1, stat2) ->
-%%% compares the difference in stats, one will be from exometer, the other from
-%%% the metadata, if method == lww then it will check the vector clocks and
-%%% it will replace the data on the oldest one. basically returns the newest data
-%%% and then updates both the metadata and the exometer data with that value.
-
-
-%%% compare_fix(stat1, stat2) ->
-%%% if lww, then it replaces.
-%%% compare_fix(stat1, stat2) ->
-%%% if metadata then the stat from metadata will replace.
-%%% compare_fix(stat1, stat2) ->
-%%% if exometer then the stat from exometer will replace.
-
-%% TODO: write a function that compares the data (status) in exom and meta
-
-%%% -----
-
-%%change_helper(Mod, Stats, St) ->
-%%  lists:foreach(fun(N) ->
-%%    change_status(Mod, N, St)
-%%                end, Stats).
-
-% change_status(Mod, N, St) ->
-%   Value = check_meta(M, N, St),
-%   EVal  = check_exom(M, N),
-%   {_,Return} = riak_stat_assist_mgr:stat_compare(Value, Eval)
-%   Return.

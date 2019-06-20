@@ -31,8 +31,14 @@
          print_users/1, print_user/1, print_sources/1,
          print_groups/1, print_group/1, print_grants/1,
          security_enable/1, security_disable/1, security_status/1, ciphers/1,
-	       stat_show/1, stat_enabled/2, stat_disabled/2, stat_info/1,
-         stat_enable/1, stat_disable/1, stat_reset/1, stat_delete/1]).
+
+	       stat_show/1, stat_0/1, stat_disable_0/1,
+         stat_enabled/2, stat_disabled/2, stat_info/1,
+         stat_enable/1, stat_disable/1, stat_reset/1,
+
+         load_profile/1, add_profile/1, add_stat/1,
+         change_profile_stat/1, check_profile_stat/1,
+         remove_profile/1, remove_stat/1, reset_profile/0, reset_profile/1]).
 
 %% New CLI API
 -export([command/1]).
@@ -1157,32 +1163,141 @@ parse_cidr(CIDR) ->
 %%% Stats
 %%%-------------------------------------------------------------------
 
-% riak-admin stat show riak.**
+-spec(stat_show(Arg :: term()) -> ok | term()).
+%% @doc
+%% Automatically shows the enabled stats for
+%% riak-admin stat show riak.**
+%% @end
 stat_show(Arg) ->
     stat_enabled(Arg, enabled).
 
-% riak-admin stat enabled riak.** % shows enabled stats etc
+-spec(stat_enabled(Arg :: term(), Status :: atom()) -> ok | term()).
+%% @doc
+%% riak-admin stat enabled riak.** % shows enabled stats etc
+%% @end
 stat_enabled(Arg, enabled) ->
     riak_stat_mngr:show_stat(Arg, enabled).
+-spec(stat_disabled(Arg :: term(), Status :: atom()) -> ok | term()).
+%% @doc
+%% same as above but will display disabled stats
+%% @end
 stat_disabled(Arg, disabled) ->
     riak_stat_mngr:show_stat(Arg, disabled).
 
-% enable the stats
+-spec(stat_0(Arg :: term()) -> ok | term()).
+%% @doc
+%% Check all the stats in exometer that are not being updated by testing
+%% or otherwise, includes their vclock so their registration can be checked
+%% This helps disable stats that are unused.
+%% behaves similar to stat show/info
+%% @end
+stat_0(Arg) ->
+    riak_stat_mngr:stat0(Arg).
+
+-spec(stat_disable_0(Arg) -> ok | term()).
+%% @doc
+%% behaves the same as stat_0 but will disable all the stats that are not
+%% updating as well
+%% @end
+stat_disable_0(Arg) ->
+    riak_stat_mngr:disable0(Arg).
+
+-spec(stat_enable(Arg :: term()) -> ok | term()).
+%% @doc
+%% enable the stats
+%% @end
 stat_enable(Arg) ->
     riak_stat_mngr:stat_change(Arg, enabled).
 
-% disable the stats
+-spec(stat_disable(Arg :: term()) -> ok | term()).
+%% @doc
+%% disable the stats
+%% @end
 stat_disable(Arg) ->
     riak_stat_mngr:stat_change(Arg, disabled).
 
-% resets the stats
+-spec(stat_reset(Arg :: term()) -> ok | term()).
+%% @doc
+%% resets the stats
+%% @end
 stat_reset(Arg) ->
     riak_stat_mngr:reset_stat(Arg).
 
-% information on the stat
+-spec(stat_info(Arg :: term()) -> ok | term()).
+%% @doc
+%% information on the stat
+%% @end
 stat_info(Arg) ->
     riak_stat_mngr:stat_info(Arg).
 
-% delete the stat
-stat_delete(Arg) ->
-    riak_stat_mngr:delete_stat(Arg).
+%%%% PROFILES %%%%
+
+-spec(load_profile(FileName :: term()) -> term()).
+%% @doc
+%% Loads the profile of that name, and then will enable/disable all the stats
+%% in exometer and in the metadata
+%% @end
+load_profile(FileName) ->
+    riak_stat_mngr:load_profile(FileName).
+
+-spec(add_profile(FileName :: term()) -> term()).
+%% @doc
+%% Adds a profile with same name as the filename into the metadata, with it's values
+%% being the stat names stored inside, the stats can be stored as riak.riak_kv.**
+%% or as [riak,riak_kv] as long as they are in the format:
+%%
+%% {enabled, [riak.riak_kv.**, [riak,riak_core]]}
+%% {disabled, [riak.riak_api.**]}
+%%
+%% @end
+add_profile(FileName) ->
+    riak_stat_mngr:add_profile(FileName).
+
+-spec(add_stat(Stat :: term()) -> ok | term()).
+%% @doc
+%% add a stat to the list of enabled or disabled stats in the profiles metadata
+%% @end
+add_stat(Stat) ->
+    riak_stat_mngr:add_profile_stat(Stat).
+
+-spec(remove_profile(FileName :: term()) -> term()).
+%% @doc
+%% remove the profile from the metadata if it is not longer necessary
+%% @end
+remove_profile(FileName) ->
+    riak_stat_mngr:remove_profile(FileName).
+
+-spec(remove_stat(StatName :: term()) -> term()).
+%% @doc
+%% remove the stat from the metadata profile, will be from the profile currently
+%% loaded
+%% @end
+remove_stat(StatName) ->
+    riak_stat_mngr:remove_profile_stat(StatName).
+
+-spec(change_profile_stat(Arg :: term()) -> ok | term()).
+%% @doc
+%% changes the status of a stat in the current profile, it is in the format of
+%% riak.riak_kv.node.gets.** etc...
+%% whatever the current stat is set to it will change it to the opposite in the
+%% metadata
+%% @end
+change_profile_stat(Arg) ->
+    riak_stat_mngr:change_profile_stat(Arg).
+
+-spec(check_profile_stat(Arg :: term()) -> ok | term()).
+%% @doc
+%% check what the status of a stat is in the currently loaded profile
+%% @end
+check_profile_stat(Arg) ->
+    riak_stat_mngr:check_profile_stat(Arg).
+
+-spec(reset_profile(Arg :: term()) -> term()).
+reset_profile(_Arg) ->
+    reset_profile().
+-spec(reset_profile() -> term()).
+%% @doc
+%% unloads from the current profile, so all the stats are re-enabled.
+%% @end
+reset_profile() ->
+    riak_stat_mngr:reset_profiles().

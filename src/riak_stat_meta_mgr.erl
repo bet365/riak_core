@@ -10,15 +10,13 @@
 -include("riak_core_metadata.hrl").
 
 -export([
-  register_stat/4, unregister/1, check_status/1, set_options/2]).
+  register_stat/4, unregister/1, check_meta/1,
+  check_status/1, change_status/2,
+  set_options/2, reset_stat/1]).
 
-%% API
--export([find_entries/1, find_entries/2]).
-
-
--define(PFX, fun riak_stat_mngr:prefix/0).
+-define(PFX, riak_stat_mngr:prefix()).
 -define(STAT, stats).
--define(NODEID, fun riak_core_nodeid:get/0).
+-define(NODEID, riak_core_nodeid:get()).
 
 %%%-------------------------------------------------------------------
 %%% API
@@ -38,7 +36,7 @@
 register_stat(StatName, Type, Opts, Aliases) ->
   case check_meta(StatName) of % check registration
     undefined -> % if not registered return default Opts
-      re_register_stat(StatName, Type, Opts, Aliases),
+      re_register_stat(StatName, Type, [{vclock, vclock:fresh(?NODEID, 1)}| Opts], Aliases),
       Opts;
     {_Type, MetaOpts, _Aliases} -> % if registered
       find_register_status(Opts, MetaOpts);
@@ -48,6 +46,10 @@ register_stat(StatName, Type, Opts, Aliases) ->
         [?NODEID, ?STAT, StatName, Type, Opts, Aliases])
   end.
 
+-spec(check_meta(StatName :: metadata_key()) -> ok | term()).
+%% @doc
+%% returns the value of the stat from the metadata
+%% @end
 check_meta(StatName) ->
   case riak_core_metadata:get({?NODEID, ?STAT}, StatName) of
     undefined ->
@@ -88,7 +90,8 @@ find_unregister_status({{_NI, _S}, SN, {_T, Opts, _A}}) ->
 re_register_stat(StatName, Type, Opts, Aliases) ->
   % {{NodeId, stats}, [riak, riak_kv, node, gets], {spiral, [{resets,1},{status,enabled}],...}}
   riak_core_metadata:put({?NODEID, ?STAT}, StatName, {Type, Opts, Aliases}),
-  lager:info("Stat registered in metadata: {{~p,~p},~p,{~p,~p,~p}}~n").
+%%  lager:info("Stat registered in metadata: {{~p,~p},~p,{~p,~p,~p}}~n"),
+  ok.
 
 
 %%%%%%%%%% UNREGISTERING %%%%%%%%%%%%
@@ -110,7 +113,7 @@ unregister(Statname) ->
 
 %%%%%%%%%% READING OPTS %%%%%%%%%%%%
 
--spec(check_status(StatName :: term()) -> term()).
+-spec(check_status(StatName :: metadata_key()) -> term()).
 %% @doc
 %% Returns the status of the stat saved in the metadata
 %% @end
@@ -118,14 +121,21 @@ check_status(StatName) ->
   case check_meta(StatName) of
     {{_NI, _S}, StatName, {_T, Opts, _A}} ->
       Status = find_register_status([], Opts),
-      riak_stat_assist_mgr:print_status(StatName, Status);
+      io:fwrite("~p:~p~n", [StatName, Status]);
     Reason ->
       {error, Reason}
   end.
 
 %%%%%%%%%% SET OPTIONS %%%%%%%%%%%%%
 
--spec(set_options(StatName :: atom() | list(), NewOpts :: list() | tuple()) ->
+-spec(change_status(Statname :: metadata_key(), ToStatus :: atom()) -> ok | term()).
+%% @doc
+%% Changes the status in the metadata
+%% @end
+change_status(Statname, ToStatus) ->
+  set_options(Statname, {status, ToStatus}).
+
+-spec(set_options(StatName :: metadata_key(), NewOpts :: list() | tuple()) ->
   ok | term() | {error, Reason}).
 %% @doc
 %% Setting the options in the metadata manually, such as {unregistered, false | true} etc...
@@ -142,7 +152,8 @@ set_options(Statname, {Key, NewVal}) ->
       io:fwrite("Stat is unregistered: ~p~n", [Statname]);
     {Type, Opts, Aliases} ->
      NewOpts = lists:keyreplace(Key, 1, Opts, {Key, NewVal}),
-      set_options(Statname, Type, NewOpts, Aliases)
+      NewOpts2 = fresh_clock(NewOpts),
+      set_options(Statname, Type, NewOpts2, Aliases)
   end.
 
 set_options(StatName, Type, NewOpts, Aliases) ->
@@ -150,146 +161,58 @@ set_options(StatName, Type, NewOpts, Aliases) ->
 
 %%%%%%%%% RESETTING %%%%%%%%%%%
 
+-spec(reset_stat(Statname :: metadata_key()) -> ok | term()).
+%% @doc
+%% reset the stat in exometer and notify exometer of its reset
+%% @end
+reset_stat(Statname) ->
+  case check_meta(Statname) of
+    undefined ->
+      io:fwrite("Stat is not registered: ~p~n", [Statname]);
+    unregistered ->
+      io:fwrite("Stat is unregistered: ~p~n", [Statname]);
+    {Type, Opts, Aliases} ->
+      {value, {resets, Resets}} = lists:keysearch(resets, 1, Opts),
+      NewOpts1 = change_status(Statname, enabled),
+      set_options(Statname, Type,
+        lists:keyreplace(resets, 1, NewOpts1, {resets, reset_inc(Resets)}), Aliases)
+  end.
 
-
-
-
-
-
-
-
-
-
-
-
-%%find_status(Statname) ->
-%%  print_stat(check_meta(Statname)).
-
-
-find_entries(Arg) ->
-  find_entries(Arg, enabled).
-
-find_entries(Arg, Status) ->
-  riak_stat_assist_mgr:find_meta_entries(Arg, Status).
-
-% TODO: actually write functions for the metadata
-% TODO: abstract it all out
-% TODO: below
-
-
-
-
-
-
-
-
-
-
-
+fresh_clock(Opts) ->
+  {value, {vclock, [{Node, {Count, _VC}}]}} = lists:keysearch(vclock, 1, Opts),
+  lists:keyreplace(vclock, 1, Opts, {vclock, clock_fresh(Node, Count)}).
 
 reset_inc(Count) -> Count + 1.
 
+clock_fresh(Node, Count) ->
+  vclock:fresh(Node, vc_inc(Count)).
+vc_inc(Count) -> Count + 1.
 
-%% check_stats(all) ->
-%% check_stats([Stat]) -> % checks a list of stats given, riak.riak_kv.node.gets etc...
-%%% taken from riak-admin, pass a list to console, translate to here
 
-%% print_stats(all) -> % all that are enabled and disabled
-%% print_stats(enabled) -> % print all stats that are enabled
-%% print_stats(disabled) -> % print all stats that are disabled
+%%%%%%%%% PROFILES %%%%%%%%%%
 
-%% disable_all(all) -> % typing in all the riak-admin disables all stats on all nodes
-%% disable_all([Stats]) -> % disables these specific stats on all nodes
-%% disable_stat_for_me(all) -> % disables all stats on one node
-%% disable_stat_for_me([Stats]) -> % disables specific stats on one node
-%% disable_stat_for_them(all) -> % disable all stats on every node except this one
-%% disable_stat_for_them([Stats]) -> % disables specific stats on all nodes except this one.
-%% the function below can be used to both enable and disable the stat.
+load_profile(ProfileName) ->
+  ok.
 
-%%%% Mod is the module stat value, it is currently set to core, will want to change it to
-%%%% the specific modules for stats.
+reset_profile() ->
+  % enable all stats
+  ok.
 
-%%change_all(Mod, all, ToStatus) -> % typing in enable-all the riak-admin enables all stats on all nodes
-%%  Stats = [exometer:info(Stat, name) || Stat <- ets:tab2list(exometer_util:table())],
-%%  status_helper(Mod, Stats, ToStatus);
-%%change_all(Mod, Stats, ToStatus) -> % enables these specific stats on all nodes
-%%  status_helper(Mod, Stats, ToStatus).
+add_profile(ProfileName, Stats) ->
+  ok.
 
-%% enable_stat_for_me(all) -> % enables all stats on one node
-%% enable_stat_for_me([Stats]) -> % enables specific stats on one node
-%% enable_stat_for_them(all) -> % enable all stats on every node except this one
-%% enable_stat_for_them([Stats]) -> % enables specific stats on all nodes except this one.
+add_profile_stat(ProfileName, StatName) ->
+  ok.
 
-%% stats_diff(all) -> % show which stats are disabled or enabled which are different for each node
-%%% return 'none' for when there is no difference between the stat difference.
+remove_profile(ProfileName) ->
+  ok.
 
-%% force_update_all() -> % will check the values in exometer and change them if they are different to
-% the data stored in the metadata
-%% force_update_me() ->  % checks the values in exometer for this specific node and updates.
+remove_profile_stat(ProfileName, Stat) ->
+  ok.
 
-%%% ---- disable and enable specific stat types ---- %%%
+change_profile_stat(ProfileName, Stat) ->
+  % change the status to be the opposite
+  ok.
 
-%% disable_stat_mod(ModuleName, all) ->
-%% disable_stat_mod(ModuleName, [Stats]) -> % [[~,~,node,gets],[~,~,node,gets,counter]]
-%% disable_all_but_mod(ModuleName, all) ->
-%% disable_all_but_mod(ModuleName, [Stats]) ->
-
-%%% --------- Functions --------- %%%
-%%
-%%% call from riak-admin stat enable/disable ***
-%%change_status(Mod, N, St) ->
-%%  [{status, NewSt}] = check_meta(Mod, N, [{status, St}]),
-%%  %% if the value St is the same as the one in the meta data,
-%%  %% we still want to run it through the exometer, just because the
-%%  %% value might be different in exometer, especially if the node
-%%  %% restarts, value is automatically enabled.
-%%
-%%  %% we will always check and update the metadata first, mainly because
-%%  %5 if a problem occurs mid-change the value is stored in meta
-%%  case exometer:setopts(N, [{status, NewSt}]) of
-%%    ok ->
-%%      NewSt;
-%%    Error ->
-%%      Error
-%%  end.
-%%
-
-%%
-%%%% definitely needs reviewing
-%%info_stat(Mod, N) ->
-%%  E = exometer:info(N),
-%%  case riak_core_metadata:get({Mod, ?STAT}, N) of % check metadata is = to
-%%    Value when Value == E ->                      % exometer
-%%      Value;
-%%    Value when Value =/= E ->
-%%      riak_core_metadata:put({Mod, ?STAT}, N, Value),
-%%      Value
-%%  end .
-%%
-%%show_stat(Pats) ->
-%%  exometer:select(Pats).
-%%
-%%%%% --------- META Functions --------- %%%
-%%
-%%% check the metadata's value for the stat
-%%check_meta(Mod, N, Opts) ->
-%%  case riak_core_metadata:get({Mod, ?STAT}, N, Opts) of
-%%    undefined ->
-%%      %% first time changing opts
-%%      riak_core_metadata:put({Mod, ?STAT}, N, Opts),
-%%      Opts;
-%%    Value when Opts == Value ->
-%%      %% changing data to a value already saved in meta
-%%      Value;
-%%    Value when Opts =/= Value ->
-%%      riak_core_metadata:put({Mod, ?STAT}, N, Opts),
-%%      Opts   %% data has been changed, this is the value
-%%  end.
-%%
-
-%%%%----------------Helper Functions----------------%%%%
-
-%%change_helper(Mod, Stats, St) ->
-%%  lists:foreach(fun(N) ->
-%%    change_status(Mod, N, St)
-%%                end, Stats).
+check_profile_stat(ProfileName, Stat) ->
+   ok.
