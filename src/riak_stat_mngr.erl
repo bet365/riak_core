@@ -80,7 +80,8 @@
 % Additional API
 -export([
   start/0, stop/0, get_datapoints/2, get_datapoints/3, get_val_fol/4,
-  notify/3, delete_metric/1, vnodeq_atom/2, prefix/0]).
+  notify/3, delete_metric/1, vnodeq_atom/2, prefix/0, the_alpha_stat/2,
+  meta_keyer/2, sanitise/1, change_these_stats/1]).
 
 -export([start_link/0]).
 %% gen_server callbacks
@@ -101,7 +102,7 @@
   method = lww,     % lww is the default
   profile, % profiles that include the {Profile, [Stats]}
   aggr = false}).     % default decision for stats, turn aggregation off.
-   % Todo: turn Aggr on and off
+% Todo: turn Aggr on and off
 
 %%%%% @doc %%%%%
 
@@ -251,7 +252,6 @@ reset_stats(Name) ->
 %%  gen_server:call(?SERVER, {method, Method}).
 
 
-
 %%%%%%%%%% PROFILES %%%%%%%%%%%
 
 -spec(load_profile(ProfileName :: term()) -> term() | ok | {error, Reason}).
@@ -287,7 +287,7 @@ add_profile_stat(Stat) ->
 
 -spec(remove_profile(ProfileName :: atom) -> term() | ok | {error, Reason}).
 %% @doc
-%% remove the profile
+%% remove the profile from the metadata
 %% @end
 remove_profile(ProfileName) ->
   gen_server:call(?SERVER, {remove_profile, ProfileName}).
@@ -301,14 +301,17 @@ remove_profile_stat(Stat) ->
 
 -spec(change_profile_stat(Stat :: list()) -> term() | ok | {error, Reason}).
 %% @doc
-%% remove a stat in that specific profile
+%% change a status of a stat in the profile loaded, changes in permanently in the
+%% profile and changes it in the metadata
 %% @end
 change_profile_stat(Stat) ->
   gen_server:call(?SERVER, {change_profile_stat, Stat}).
 
 -spec(check_profile_stat(Stat :: list()) -> term() | ok | {error, Reason}).
 %% @doc
-%% remove a stat in that specific profile
+%% check a status of a stat in the current profile
+%% checks the file and the metadata, if there is a difference the file
+%% takes authority as default
 %% @end
 check_profile_stat(Stat) ->
   gen_server:call(?SERVER, {check_profile_stat, Stat}).
@@ -378,11 +381,13 @@ reset_stat(Arg) ->
 register_meta_stats(Statname, Type, Opts, Aliases) ->
   riak_stat_meta_mgr:register_stat(Statname, Type, Opts, Aliases).
 
-% register the profiles into meta data
--spec(register_meta_profiles(ProfileName :: atom(), StatList :: list()) ->
+-spec(register_meta_profiles(ProfileName :: atom() | term(), StatList :: list()) ->
   term() | ok | {error, Reason}).
+%% @doc
+%% register the profile name and the stats into the metadata
+%% @end
 register_meta_profiles(ProfileName, StatList) ->
-  riak_stat_meta_mgr:register(ProfileName, StatList).
+  riak_stat_meta_mgr:add_profile(ProfileName, StatList).
 
 -spec(check_meta_status(Arg :: term(), Status :: atom()) -> term() | {error, Reason}).
 %% @doc
@@ -478,7 +483,7 @@ aliases(Type, Args) ->
 %% looks in exometer for an items specific value and returns it
 %% @end
 check_exom_info(Name, Item) ->
-   riak_stat_exom_mgr:info(Name, Item).
+  riak_stat_exom_mgr:info(Name, Item).
 
 -spec(change_exom_status(Name :: list() | atom(), Status :: atom() | list()) -> ok | term()).
 %% @doc
@@ -575,7 +580,7 @@ handle_call({register, App, Stats}, _From, State) ->
     register_stat(prefix(), App, Stat)
                 end, Stats),
   {reply, ok, State};
-handle_call({vnode_stats, App, Stats}, _From,  State) ->
+handle_call({vnode_stats, App, Stats}, _From, State) ->
   lists:foreach(fun
                   ({Stat, Type, Alias}) ->
                     register_stats(App, [{Stat, Type, [], Alias}]);
@@ -583,7 +588,7 @@ handle_call({vnode_stats, App, Stats}, _From,  State) ->
                     register_stats(App, [{Stat, Type}])
                 end, Stats),
   {reply, ok, State};
-handle_call({get_app_stats, App}, _From,  State) ->
+handle_call({get_app_stats, App}, _From, State) ->
   Values = get_values([prefix(), App]),
   {reply, Values, State};
 handle_call({update, App, Name, UpdateVal, Type}, _From, State) ->
@@ -625,7 +630,7 @@ handle_call({show, Arg, Status}, _From, State = #state{}) ->
   {reply, Status, State};
 handle_call({stat0, Arg}, _From, State) ->
   {NotUpdating, _Updating} = not_updating(Arg),
-    Reply = [io:fwrite("~p~n", [Name]) || {Name, _Val} <- NotUpdating],
+  Reply = [io:fwrite("~p~n", [Name]) || {Name, _Val} <- NotUpdating],
   {reply, Reply, State};
 handle_call({disable0, Arg}, _From, State) ->
   {NotUpdating, _Updating} = not_updating(Arg),
@@ -658,73 +663,59 @@ handle_call({info, Name, Item}, _From, State) ->
 
 %%% PROFILES %%%
 
-%%handle_call(profiles, _From, State = #state{profiles = Profiles}) ->
-%%  orddict:map(fun(ProfileName, StatList) ->
-%%    register_meta_profiles(ProfileName, StatList)
-%%              end, Profiles),
-%%  {reply, ok, State};
-handle_call({load, ProfileName}, _From, State) ->
-
-  % check in the metadata for the profile
-    % If there is not a profile of that name -> "profile not found"
-  % If the profile exists, pull out the stats and run them through
-  % change status
-
-  % return -> profile ~p loaded~n : then a list of the stats that are
-  % enabled and disabled
-
+handle_call({load, ProfileName}, _From, State = #state{}) ->
+  ProfName = sanitise(ProfileName),
+  riak_stat_meta_mgr:load_profile(ProfName),
+  {reply, ok, State#state{profile = ProfileName}};
+handle_call(reset_profile, _From, State = #state{profile = ProfileName}) ->
+  Stats = riak_stat_meta_mgr:reset_profile(ProfileName),
+  change_these_stats(Stats),
+  {reply, ok, State#state{profile = []}};
+handle_call({add_profile, ProfileName0}, _From, State) ->
+  ProfileName = sanitise(ProfileName0),
+  Reply =
+  case ensure_directory() of
+    ok ->
+      case read_file(ProfileName) of
+        {error, Reason} ->
+          io:fwrite("error: ~p~n", [Reason]);
+        Data -> % data is returned in a string and needs sanitising
+          register_meta_profiles(ProfileName, string_sanitiser(Data))
+      end;
+    {error, Reason} ->
+      io:fwrite("error: ~p~n", [Reason])
+  end,
+  {reply, Reply, State};
+handle_call({add_profile_stat, Stat}, _From, State = #state{profile = Profile}) ->
+  SaniData = string_sanitiser(Stat),
+  riak_stat_meta_mgr:add_profile_stat(Profile, SaniData),
   {reply, ok, State};
-handle_call(reset_profile, _From, State) ->
-
-  % enable all the stats, pull out all the disbaled stats from the
-  % metadata and then enabled them in exometer
-
-  % remove the profile in the state and change to 'none'
-
+handle_call({remove_profile, ProfileName}, _From, State = #state{profile = CurrentProfile}) ->
+  ProfName = sanitise(ProfileName),
+  case ProfName of
+    CurrentProfile ->
+      reset_profiles(),
+      remove_a_profile(ProfName);
+    _ ->
+      remove_a_profile(ProfName)
+  end,
   {reply, ok, State};
-handle_call({add_profile, ProfileName}, _From, State) ->
-
-  % find the file name in the profile folder location
-  % if not found return -> profile name not found
-  % if it is found save in the metadata, with the filename as
-  % the name of the key, and pull the stats out to go in as the key,
-  % the stats are removed and sanitised, i.e.
-
-  % if they are in the format riak.riak_kv.** then it will
-  % keep them in that format for find_entries,
-  % if they are in the format [riak,riak_kv], it will put them in a separate
-  % list, once the former style is converted in find_entries it cna be added into
-  % this list, this list will have the stats name as the key and the status as the value
-  % in the metadata it will look like:
-
-  % {ProfileName, {[riak,riak_kv,node,gets,time],enabled}}
-
+handle_call({remove_profile_stat, Stat}, _From, State = #state{profile = Profile}) ->
+  Stats = [StatName || {{StatName, _, _S}, _DP} <- find_entries(Stat, '_')],
+  riak_stat_meta_mgr:remove_profile_stat(Profile, Stats),
   {reply, ok, State};
-handle_call({add_profile_stat, Stat}, _From, State) ->
-  % pull current profile from state
-  % remove the stat from the metadata and from the file?
-
+handle_call({change_profile_stat, Stat}, _From, State = #state{profile = Profile}) ->
+  SaniData = string_sanitiser(Stat),
+  riak_stat_meta_mgr:change_profile_stat(Profile, SaniData),
   {reply, ok, State};
-handle_call({remove_profile, ProfileName}, _From, State) ->
-   % find the profile name in the metadata and remove all entries
-
-  {reply, ok, State};
-handle_call({remove_profile_stat, Stat}, _From, State) ->
-  % same as adding a stat, find current profile and then remove the stat of name
-  % given from the metadata and possibly from the file
-  {reply, ok, State};
-handle_call({change_profile_stat, Stat}, _From, State) ->
-  % change the status to the opposite for a stat in the current profile
-
-  {reply, ok, State};
-handle_call({check_profile_stat, Stat}, _From, State) ->
-  % check the status is of a stat or status in the current profile,
-  % now i write this is seems to be a mistake as i can just do this manually through change status
-  % but this persists it down for this profile so ?? might be better?
-
-  % talk to dine
-
-  {reply, ok, State};
+handle_call({check_profile_stat, Stat}, _From, State = #state{profile = Profile}) ->
+  Stats = [StatName || {{StatName, _, _S}, _DP} <- find_entries(Stat, '_')],
+  Reply =
+  [io:fwrite("~p: ~p~n", [Stat, Status]) || [{Stat, Status}]
+  <- lists:map(fun(Stat0) ->
+      riak_stat_meta_mgr:check_profile_stat(Profile, Stat0)
+              end, Stats)],
+  {reply, Reply, State};
 handle_call(_Request, _From, State) ->
   {reply, ok, State}.
 
@@ -833,7 +824,6 @@ pick_info_attrs(Arg) ->
   end.
 
 
-
 %%%===================================================================
 %%% change status
 %%%===================================================================
@@ -851,13 +841,17 @@ change_status(Name, ToStatus) ->
       change_exom_status(Name, ToStatus)
   end.
 
+change_these_stats(Stats) ->
+  lists:map(fun({StatName, {status, Status}}) ->
+    change_status(StatName, Status)
+            end, Stats).
 
 %%%===================================================================
 %%% Update stats
 %%%===================================================================
 
 not_updating(Arg) ->
-  lists:foldl(fun({Name,  []}, {Nil, Ok}) -> {[{Name, []} | Nil], Ok};
+  lists:foldl(fun({Name, []}, {Nil, Ok}) -> {[{Name, []} | Nil], Ok};
     ({Name, Val}, {Nil, Ok}) -> {Nil, [{Name, Val} | Ok]}
               end, {[], []},
     [{E, get_info(E, value)} || {{E, _, _S}, _DP} <- find_entries(Arg, enabled)]).
@@ -898,3 +892,134 @@ responder(Arg, CuStatus, Fun, Extra) ->
         [io:fwrite("~p: ~p~n", [N, Fun(N, Extra)])
           || {N, _, _} <- Entries]
     end, find_entries(Arg, CuStatus)).
+
+%%%===================================================================
+%%% Profiles
+%%%===================================================================
+
+ensure_directory() ->
+  filelib:ensure_dir(profiles).
+
+read_file(FileName) ->
+  case open_file(FileName) of
+    {ok, IoDevice} ->
+      case read(IoDevice) of
+        {ok, Data} ->
+          Data;
+        eof ->
+          {error, no_data};
+        {error, Reason} ->
+          {error, Reason}
+      end;
+    {error, Reason} ->
+      Reason
+  end.
+
+read(IoDevice) ->
+  file:read(IoDevice, 666).
+
+open_file("riak/doc/profiles/" ++ FileName) ->
+  file:open(FileName, [raw]).
+
+string_sanitiser(Data) ->
+  case Data of
+    "[" ++ Rest ->
+      % the data has been stored in a list
+      string_sanitiser_helper(Rest);
+    Rest when is_list(Rest)->
+      string_sanitiser_helper(Rest)
+  end.
+
+string_sanitiser_helper(Data) ->
+  {RawToEnable0, RawToDisable0} = find(Data),
+  RawToEnable = sanitise_me(RawToEnable0),
+  RawToDisable = sanitise_me(RawToDisable0),
+  {{RawEnEntries, _, _S}, _DP} =  [find_entries(Arg, '_') || Arg <- RawToEnable],
+  {{RawDisEntries, _A, _SA}, _DPA} = [find_entries(Arg, '_') || Arg <- RawToDisable],
+  the_alpha_stat(
+  meta_keyer(RawEnEntries, enabled) , meta_keyer(RawDisEntries, disabled)).
+
+find(Data) ->
+  EnabledData = search_for(Data, enabled),
+    case search_for(EnabledData, disabled) of
+      nomatch ->
+        case search_again_for(EnabledData, disabled) of
+          nomatch ->
+            {EnabledData, []};
+          DisabledData ->
+            {EnabledData, DisabledData}
+        end;
+      DisabledData ->
+        {EnabledData, DisabledData}
+    end.
+
+find_enabled(String, Dir) ->
+  find_(String, "{enabled,", Dir).
+
+find_disabled(String, Dir) ->
+  find_(String, "{disabled,", Dir).
+
+find_(String, Search, Dir) ->
+  string:find(String, Search, Dir).
+
+search_for(String, enabled) ->
+  find_enabled(String, trailing);
+search_for(String, disabled) ->
+  find_disabled(String, trailing).
+
+search_again_for(String, enabled) ->
+  find_enabled(String, leading);
+search_again_for(String, disabled) ->
+  find_disabled(String, leading).
+
+sanitise([Data]) when is_list(Data) ->
+  sanitise_(Data).
+
+sanitise_(Data) when is_list(Data)->
+  list_to_atom(Data).
+
+
+sanitise_me(Data) ->
+  case Data of
+    [] ->
+      [];
+    "[" ++ Rest ->
+      put_me_in_list(next(Rest));
+    TheRest ->
+      put_me_in_list(next(TheRest))
+  end.
+
+next(Rest) ->
+  case find_(Rest, "}", trailing) of
+    nomatch ->
+      Rest;
+    NewRest ->
+      NewRest
+  end.
+
+put_me_in_list(Data) ->
+  re:split(Data, ",", [{return, list}]).
+
+meta_keyer(Keys, Status) ->
+  lists:foldl(
+    fun(StatName, Acc) ->
+      [put_me_in_tuple(StatName, Status) | Acc]
+    end, [], Keys).
+
+put_me_in_tuple(Key, Value) ->
+  {Key, {status, Value}}. % this is the full Value stored in the metadata,
+                          % the profile name is the key
+
+%% In the case when everything is disabled, which is most likely the case then
+%% some stats will be saved more than once with disabled and enabled as values
+%% this goes through the list and removes any that have both enabled and disabled
+%% values, leaving the enabled stats behind
+the_alpha_stat(Enabled, Disabled) ->
+  % The keys are sorted first with ukeysort which deletes duplicates, then merged
+  % so any key with the same stat name that is both enabled and disabled returns
+  % only the enabled option.
+  lists:ukeymerge(2, lists:ukeysort(1, Enabled), lists:ukeysort(1, Disabled)).
+  % The stats must fight, to become the alpha
+
+remove_a_profile(Profile) ->
+  riak_stat_meta_mgr:remove_profile(Profile).

@@ -324,7 +324,7 @@ delete(FullPrefix, Key) ->
     delete(FullPrefix, Key, []).
 
 %% @doc Removes the value associated with the given prefix and key locally and then
-%% triggers a broradcast to notify other nodes in the cluster. Currently there are
+%% triggers a broadcast to notify other nodes in the cluster. Currently there are
 %% no delete options
 %%
 %% NOTE: currently deletion is logical and no GC is performed.
