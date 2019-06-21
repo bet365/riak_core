@@ -254,7 +254,7 @@ reset_stats(Name) ->
 
 %%%%%%%%%% PROFILES %%%%%%%%%%%
 
--spec(load_profile(ProfileName :: term()) -> term() | ok | {error, Reason}).
+-spec(load_profile(ProfileName :: term()) -> term() | ok | {error, Reason :: term()}).
 %% @doc
 %% loads a profile from the metadata, if it does not exist it will
 %% return an error
@@ -262,7 +262,7 @@ reset_stats(Name) ->
 load_profile(ProfileName) ->
   gen_server:call(?SERVER, {load, ProfileName}).
 
--spec(reset_profiles() -> term() | {error, Reason}).
+-spec(reset_profiles() -> term() | {error, Reason :: term()}).
 %% @doc
 %% resets all the stats back to enabled and removes the current loaded
 %% profile
@@ -271,43 +271,42 @@ load_profile(ProfileName) ->
 reset_profiles() ->
   gen_server:call(?SERVER, reset_profile).
 
--spec(add_profile(ProfileName :: term()) -> term() | ok | {error, Reason}).
+-spec(add_profile(ProfileName :: term()) -> term() | ok | {error, Reason :: term()}).
 %% @doc
 %% Add the profile and the stats
 %% @end
 add_profile(ProfileName) ->
   gen_server:call(?SERVER, {add_profile, ProfileName}). % add to orddict
 
--spec(add_profile_stat(Stat :: list()) -> term() | ok | {error, Reason}).
+-spec(add_profile_stat(Stat :: list()) -> term() | ok | {error, Reason :: term()}).
 %% @doc
 %% add a stat to the list in the profile
 %% @end
 add_profile_stat(Stat) ->
   gen_server:call(?SERVER, {add_profile_stat, Stat}).
 
--spec(remove_profile(ProfileName :: atom) -> term() | ok | {error, Reason}).
+-spec(remove_profile(ProfileName :: atom) -> term() | ok | {error, Reason :: term()}).
 %% @doc
 %% remove the profile from the metadata
 %% @end
 remove_profile(ProfileName) ->
   gen_server:call(?SERVER, {remove_profile, ProfileName}).
 
--spec(remove_profile_stat(Stat :: list()) -> term() | ok | {error, Reason}).
+-spec(remove_profile_stat(Stat :: list()) -> term() | ok | {error, Reason :: term()}).
 %% @doc
 %% remove a stat in that specific profile
 %% @end
 remove_profile_stat(Stat) ->
   gen_server:call(?SERVER, {remove_profile_stat, Stat}).
 
--spec(change_profile_stat(Stat :: list()) -> term() | ok | {error, Reason}).
-%% @doc
+-spec(change_profile_stat(Stat :: list()) -> term() | ok | {error, Reason :: term()}).
 %% change a status of a stat in the profile loaded, changes in permanently in the
 %% profile and changes it in the metadata
 %% @end
 change_profile_stat(Stat) ->
   gen_server:call(?SERVER, {change_profile_stat, Stat}).
 
--spec(check_profile_stat(Stat :: list()) -> term() | ok | {error, Reason}).
+-spec(check_profile_stat(Stat :: list()) -> term() | ok | {error, Reason :: term()}).
 %% @doc
 %% check a status of a stat in the current profile
 %% checks the file and the metadata, if there is a difference the file
@@ -370,7 +369,7 @@ reset_stat(Arg) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%% METADATA %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 -spec(register_meta_stats(Statname :: term(), Type :: atom(), Opts :: list(), Aliases :: term()) ->
-  term() | ok | {error, Reason}).
+  term() | ok | {error, Reason :: term()}).
 %% @doc
 %% registers the stats in metadata if they aren't already there, If they are
 %% there it returns the status options for exometer to put.
@@ -382,21 +381,21 @@ register_meta_stats(Statname, Type, Opts, Aliases) ->
   riak_stat_meta_mgr:register_stat(Statname, Type, Opts, Aliases).
 
 -spec(register_meta_profiles(ProfileName :: atom() | term(), StatList :: list()) ->
-  term() | ok | {error, Reason}).
+  term() | ok | {error, Reason :: term()}).
 %% @doc
 %% register the profile name and the stats into the metadata
 %% @end
 register_meta_profiles(ProfileName, StatList) ->
   riak_stat_meta_mgr:add_profile(ProfileName, StatList).
 
--spec(check_meta_status(Arg :: term(), Status :: atom()) -> term() | {error, Reason}).
+-spec(check_meta_status(Arg :: term(), Status :: atom()) -> term() | {error, Reason :: term()}).
 %% @doc
 %% Checks the status that is in the metadata
 %% @end
 check_meta_status(Arg, Status) ->
   [riak_stat_meta_mgr:check_status(Name) || {{Name, _, _S}, _DPs} <- find_entries(Arg, Status)].
 
--spec(check_meta_info(StatName :: term()) -> term() | {error, Reason}).
+-spec(check_meta_info(StatName :: term()) -> term() | {error, Reason :: term()}).
 %% @doc
 %% Checks the information for that stat in the metadata
 %% @end
@@ -410,7 +409,7 @@ check_meta_info(Arg) ->
 change_meta_status(Name, ToStatus) ->
   riak_stat_meta_mgr:change_status(Name, ToStatus).
 
--spec(unreg_meta_stat(StatName :: term()) -> term() | ok | {error, Reason}).
+-spec(unreg_meta_stat(StatName :: term()) -> term() | ok | {error, Reason :: term()}).
 %% @doc
 %% Marks the meta data of a stat as unregistered, deleting the stat from the
 %% metadata will mean upon node restarting it will re_register. This option
@@ -419,14 +418,14 @@ change_meta_status(Name, ToStatus) ->
 unreg_meta_stat(Statname) ->
   riak_stat_meta_mgr:unregister(Statname).
 
--spec(reset_meta_stat(StatName :: term()) -> term() | ok | {error, Reason}).
+-spec(reset_meta_stat(StatName :: term()) -> term() | ok | {error, Reason :: term()}).
 %% @doc
 %% Adds a count on to the metadata options that the stat has been updated
 %% @end
 reset_meta_stat(Statname) ->
   riak_stat_meta_mgr:reset_stat(Statname).
 
--spec(set_meta_opts(StatName :: term(), Opts :: list()) -> term() | ok | {error, Reason}).
+-spec(set_meta_opts(StatName :: term(), Opts :: list()) -> term() | ok | {error, Reason :: term()}).
 %% @doc
 %% Set the options (values) in the metadata manually
 %% {status, Status}     -> Status :: enabled | disabled
@@ -438,7 +437,7 @@ set_meta_opts(Statname, Opts) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%% EXOMETER %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 -spec(register_exom_stats(StatName :: list(), Type :: atom(), Opts :: list(), Aliases :: list()) ->
-  term() | ok | {error, Reason}).
+  term() | ok | {error, Reason :: term()}).
 %% @doc
 %% register the stats in exometer
 %% @end
@@ -446,12 +445,12 @@ register_exom_stats(Statname, Type, Opts, Aliases) ->
   riak_stat_exom_mgr:register_stat(Statname, Type, Opts, Aliases).
 
 -spec(update_exom_stats(StatName :: atom() | list(), UpdateVal :: term(),
-    Type :: atom() | term()) -> term() | ok | {error, Reason}).
+    Type :: atom() | term()) -> term() | ok | {error, Reason :: term()}).
 update_exom_stats(StatName, UpdateVal, Type) ->
   update_exom_stats(StatName, UpdateVal, Type, []).
 
 -spec(update_exom_stats(StatName :: atom() | list(), UpdateVal :: term(),
-    Type :: atom() | term(), Opts :: list() | tuple()) -> ok | {error, Reason} | term()).
+    Type :: atom() | term(), Opts :: list() | tuple()) -> ok | {error, Reason :: term()} | term()).
 %% @doc
 %% updates the stat in exometer, if the stat does not exist it will create the stat
 %% @end
@@ -478,7 +477,7 @@ alias(Arg) ->
 aliases(Type, Args) ->
   gen_server:call(?SERVER, {aliases, Type, Args}).
 
--spec(check_exom_info(App :: atom() | term(), StatName :: term()) -> term() | ok | {error, Reason}).
+-spec(check_exom_info(App :: atom() | term(), StatName :: term()) -> term() | ok | {error, Reason :: term()}).
 %% @doc
 %% looks in exometer for an items specific value and returns it
 %% @end
@@ -493,7 +492,7 @@ check_exom_info(Name, Item) ->
 change_exom_status(Name, Status) ->
   set_exom_opts(Name, [{status, Status}]).
 
--spec(unreg_exom_stat(StatName :: term()) -> term() | ok | {error, Reason}).
+-spec(unreg_exom_stat(StatName :: term()) -> term() | ok | {error, Reason :: term()}).
 %% @doc
 %% unregister the stat form exometer, after the stat is marked as unregistered in
 %% metadata
@@ -501,7 +500,7 @@ change_exom_status(Name, Status) ->
 unreg_exom_stat(Statname) ->
   riak_stat_exom_mgr:unregister_stat(Statname).
 
--spec(reset_exom_stat(StatName :: term()) -> term() | ok | {error, Reason}).
+-spec(reset_exom_stat(StatName :: term()) -> term() | ok | {error, Reason :: term()}).
 %% @doc
 %% Reset the stat in exometer back to default
 %% @end
@@ -509,7 +508,7 @@ reset_exom_stat(Statname) ->
   riak_stat_exom_mgr:reset_stat(Statname).
 
 % change the opts in exometer manually etc
--spec(set_exom_opts(StatName :: term(), Opts :: list()) -> term() | ok | {error, Reason}).
+-spec(set_exom_opts(StatName :: term(), Opts :: list()) -> term() | ok | {error, Reason :: term()}).
 %% @doc
 %% changes the options in exometer, including the status of the stat
 %% @end
@@ -711,7 +710,7 @@ handle_call({change_profile_stat, Stat}, _From, State = #state{profile = Profile
 handle_call({check_profile_stat, Stat}, _From, State = #state{profile = Profile}) ->
   Stats = [StatName || {{StatName, _, _S}, _DP} <- find_entries(Stat, '_')],
   Reply =
-  [io:fwrite("~p: ~p~n", [Stat, Status]) || [{Stat, Status}]
+  [io:fwrite("~p: ~p~n", [Stat1, Status]) || [{Stat1, Status}]
   <- lists:map(fun(Stat0) ->
       riak_stat_meta_mgr:check_profile_stat(Profile, Stat0)
               end, Stats)],

@@ -86,7 +86,7 @@ get_datapoint(Name, DP) ->
 
 %%                                       enabled  |  disabled
 -spec(find_entries(Arg :: term()| list(), ToStatus :: atom()) ->
-  ok | term() | {error, Reason}).
+  ok | term() | {error, Reason :: term()}).
 %% @doc
 %% pulls the information of a stat out of exometer
 %% @end

@@ -1194,7 +1194,7 @@ stat_disabled(Arg, disabled) ->
 stat_0(Arg) ->
     riak_stat_mngr:stat0(Arg).
 
--spec(stat_disable_0(Arg) -> ok | term()).
+-spec(stat_disable_0(Arg :: term()) -> ok | term()).
 %% @doc
 %% behaves the same as stat_0 but will disable all the stats that are not
 %% updating as well

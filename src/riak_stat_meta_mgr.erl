@@ -32,7 +32,7 @@
 % check if the stat is already registered in metadata, and pull out the
 % options
 -spec(register_stat(StatName :: metadata_key(), Type :: atom() | term(), Opts :: list(), Aliases :: term()) ->
-  ok | term() | {error, Reason}).
+  ok | term() | {error, Reason :: term()}).
 %% @doc
 %% Checks if the stat is already registered in the metadata, if not it
 %% registers it, and pulls out the options for the status and sends it
@@ -69,9 +69,7 @@ check_meta(StatName) ->
         unregistered;
         false ->
           Value
-      end;
-    _ ->
-      lager:debug("riak_stat_meta_mgr:check_meta -- Could not check_meta~n")
+      end
   end.
 
 find_register_status(NewOpts, MetaOpts) ->
@@ -79,9 +77,7 @@ find_register_status(NewOpts, MetaOpts) ->
     false ->
       NewOpts;
     Status -> % {status, disabled}
-      [Status | NewOpts];
-    _ ->
-      lager:debug("riak_stat_meta_mgr:find_register_status -- neither 'false' nor Status~n")
+      [Status | NewOpts]
   end.
 
 find_unregister_status({{_NI, _S}, SN, {_T, Opts, _A}}) ->
@@ -144,11 +140,11 @@ change_status(Statname, ToStatus) ->
       set_options(Statname, {status, ToStatus});
     DiffStatus when DiffStatus == ToStatus ->
       {error, no_change}
-  end,
-  set_options(Statname, {status, ToStatus}).
+  end.
+%%  set_options(Statname, {status, ToStatus}).
 
 -spec(set_options(StatName :: metadata_key(), NewOpts :: list() | tuple()) ->
-  ok | term() | {error, Reason}).
+  ok | term() | {error, Reason :: term()}).
 %% @doc
 %% Setting the options in the metadata manually, such as {unregistered, false | true} etc...
 %% @end
@@ -262,7 +258,7 @@ change_profile_stat(ProfileName, Stat) ->
   change_stat_status(ProfileName, Stat).
 
 -spec(check_profile_stat(ProfileName :: term(), Stats :: term()) ->
-  ok | term() | {error, Reason}).
+  ok | term() | {error, Reason :: term()}).
 %% @doc
 %% check in the metadata for a profile and the stat(s) entered
 %% @end

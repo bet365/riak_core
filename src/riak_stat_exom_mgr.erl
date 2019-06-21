@@ -42,7 +42,7 @@
 
 % register the stat in exometer
 -spec(register_stat(StatName :: list(), Type :: atom(), Opts :: list(), Aliases :: term()) ->
-  ok | term() | {error, Reason}).
+  ok | term() | {error, Reason :: term()}).
 %% @doc
 %% Registers all stats, using exometer:re_register/3, any stat that is
 %% re_registered overwrites the previous entry, works the same as
@@ -162,7 +162,7 @@ set_opts(StatName, Opts) ->
 
 %%%%%%%%%%%%% UNREGISTER / RESET %%%%%%%%%%%%%%
 
--spec(unregister_stat(StatName :: term()) -> ok | term() | {error, Reason}).
+-spec(unregister_stat(StatName :: term()) -> ok | term() | {error, Reason :: term()}).
 %% @doc
 %% deletes the stat entry from exometer
 %% @end
