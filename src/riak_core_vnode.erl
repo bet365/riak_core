@@ -342,7 +342,7 @@ vnode_command(_Sender, _Request, State=#state{modstate={deleted,_}}) ->
     continue(State);
 vnode_command(Sender, Request, State=#state{mod=Mod,
                                             modstate=ModState,
-                                            pool_pid=Pool}) ->
+                                            pool_pid=Pool, index = Index}) ->
     case catch Mod:handle_command(Request, Sender, ModState) of
         {'EXIT', ExitReason} ->
             reply(Sender, {vnode_error, ExitReason}),
@@ -361,7 +361,12 @@ vnode_command(Sender, Request, State=#state{mod=Mod,
             riak_core_vnode_worker_pool:handle_work(Pool, Work, From),
             continue(State, NewModState);
         {stop, Reason, NewModState} ->
-            {stop, Reason, State#state{modstate=NewModState}}
+            {stop, Reason, State#state{modstate=NewModState}};
+        {error, Reason, _NewModState} ->
+            reply(Sender, {fail, Index, Reason}),
+%%            ModState1 = ModState#state{modstate = NewModState},
+%%            {stop, normal, State}
+            continue(State, ModState)
     end.
 
 vnode_coverage(Sender, Request, KeySpaces, State=#state{index=Index,
