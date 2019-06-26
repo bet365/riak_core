@@ -135,7 +135,7 @@ get_datapoint(Name, DP) ->
 %% pulls the information of a stat out of exometer
 %% @end
 find_entries(Arg, ToStatus) ->
-  lager:error("Arg: ~p ToStatus: ~p~n", [Arg, ToStatus]),
+%%  lager:error("Arg: ~p ToStatus: ~p~n", [Arg, ToStatus]),
   lists:map(
     fun(A) ->
       {S, Type, Status, DPs} = type_status_and_dps(A, ToStatus),
@@ -153,12 +153,12 @@ find_entries(Arg, ToStatus) ->
     end, Arg).
 
 type_status_and_dps(S, ToStatus) ->
-  lager:error("S: ~p ToStatus: ~p~n", [S, ToStatus]),
+%%  lager:error("S: ~p ToStatus: ~p~n", [S, ToStatus]),
 %%  [S1|Rest] = re:split(S, "/", [{return, list}]),
   [S1|Rest] = re:split(S, "/"),
-  lager:error("S1: ~p Rest: ~p~n", [S1, Rest]),
+%%  lager:error("S1: ~p Rest: ~p~n", [S1, Rest]),
   {Type, Status, DPs} = type_status_and_dps(Rest, '_', ToStatus, default),
-  lager:error("Type: ~p Status: ~p DPs: ~p~n", [Type, Status, DPs]),
+%%  lager:error("Type: ~p Status: ~p DPs: ~p~n", [Type, Status, DPs]),
   {S1, Type, Status, DPs}.
 
 type_status_and_dps([<<"type=", T/binary>>|Rest], _Type, ToStatus, DPs) ->
