@@ -20,11 +20,14 @@
 -module(riak_stat_exom_mgr).
 -author("savannahallsop").
 
+%% TODO:
+%% make sure everything returns ok | answer | {error, Reason}
+
 -export([
   register_stat/4, re_register/2, re_register/3, alias/1, aliases/2,
   get_values/1, get_datapoint/2, get_value/1, select_stat/1, info/2,
   update_or_create/3, update_or_create/4, set_opts/2,
-  unregister_stat/1, reset_stat/1]).
+  unregister_stat/1, reset_stat/1, timestamp/0]).
 
 -export([start/0, stop/0]).
 
@@ -32,7 +35,7 @@
   delete_metric/1, get_metric_value/1,new_counter/1, new_history/2, new_gauge/1]).
 
 -define(PFX, riak_stat_mngr:prefix()).
-
+-define(TS, timestamp()).
 
 %%%-------------------------------------------------------------------
 %%% API
@@ -40,9 +43,8 @@
 
 %%%%%%%%%%%% REGISTERING %%%%%%%%%%%%%
 
-% register the stat in exometer
 -spec(register_stat(StatName :: list(), Type :: atom(), Opts :: list(), Aliases :: term()) ->
-  ok | term() | {error, Reason :: term()}).
+  ok | {error, Reason :: term()}).
 %% @doc
 %% Registers all stats, using exometer:re_register/3, any stat that is
 %% re_registered overwrites the previous entry, works the same as
@@ -50,11 +52,10 @@
 %% is registered.
 %% @end
 register_stat(StatName, Type, Opts, Aliases) ->
-  re_register(StatName, Type, Opts),
-  lager:info("Stat registered in exometer: {~p,~p,~p,~p}~n", [StatName, Type, Opts, Aliases]),
+  re_register(StatName, Type, Opts), %% returns -> ok.
   lists:foreach(
     fun({DP, Alias}) ->
-      aliases(new, [Alias, StatName, DP])
+      aliases(new, [Alias, StatName, DP]) %% returns -> ok | {error, Reason}
     end, Aliases).
 
 re_register(StatName, Type) ->
@@ -176,6 +177,13 @@ unregister_stat(StatName) ->
 reset_stat(StatName) ->
   exometer:reset(StatName).
 
+-spec(timestamp() -> term()).
+%% @doc
+%% Returns the timestamp to put in the stat entry
+%% @end
+timestamp() ->
+  exometer_util:timestamp().
+
 %%%%%%%% Testing %%%%%%%%
 
 start() ->
@@ -221,7 +229,6 @@ new_gauge(Arg) ->
 %%%-------------------------------------------------------------------
 %%% Helper functions
 %%%-------------------------------------------------------------------
-
 
 alias_fun() ->
   fun(Alias, Entry, DP, Acc) ->

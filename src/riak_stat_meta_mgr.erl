@@ -22,6 +22,7 @@
 -define(STAT, stats).
 -define(PROF, profiles).
 -define(NODEID, riak_core_nodeid:get()).
+% TODO: add vclock as macro
 
 %%%-------------------------------------------------------------------
 %%% API
@@ -41,11 +42,11 @@
 register_stat(StatName, Type, Opts, Aliases) ->
   case check_meta(StatName) of % check registration
     undefined -> % if not registered return default Opts
-      re_register_stat(StatName, Type, [{vclock, vclock:fresh(?NODEID, 1)}| Opts], Aliases),
+      re_register_stat(StatName, Type, [{vclock, vclock:fresh(?NODEID, 1)} | Opts], Aliases),
       Opts;
     {_Type, MetaOpts, _Aliases} -> % if registered
-      NewOpts = find_register_status(Opts, MetaOpts),
-      re_register_stat(StatName, Type, NewOpts, Aliases);
+      find_register_status(Opts, MetaOpts);
+%%      re_register_stat(StatName, Type, NewOpts, Aliases);
     _ ->
       lager:debug("riak_stat_meta_mgr:register_stat --
       Could not register the stat:~n{{~p,~p},~p,{~p,~p,~p}}~n",
@@ -63,10 +64,10 @@ check_meta(StatName) ->
     [] ->
       undefined;
     Value ->
-      case find_unregister_status(Value) of
+      case find_unregister_status(StatName, Value) of
         true ->
           lager:debug("Stat is unregistered: ~p~n", [StatName]),
-        unregistered;
+          unregistered;
         false ->
           Value
       end
@@ -80,10 +81,10 @@ find_register_status(NewOpts, MetaOpts) ->
       [Status | NewOpts]
   end.
 
-find_unregister_status({{_NI, _S}, SN, {_T, Opts, _A}}) ->
+find_unregister_status(_SN, {_T, Opts, _A}) ->
   case lists:keyfind(unregistered, 1, Opts) of
     false ->
-      set_options(SN, {unregistered, false}),
+%%      set_options(SN, {unregistered, false}),
       false;
     {unregistered, Bool} ->
       Bool
@@ -110,7 +111,10 @@ unregister(Statname) ->
       unregistered;
     {Type, MetaOpts, Aliases} ->
       NewOpts = lists:keyreplace(unregistered, 1, MetaOpts, {unregistered, true}),
-      set_options(Statname, Type, NewOpts, Aliases)
+      set_options(Statname, Type, NewOpts, Aliases),
+      ok;
+    _ ->
+      ok
   end.
 
 %%%%%%%%%% READING OPTS %%%%%%%%%%%%
@@ -150,7 +154,7 @@ change_status(Statname, ToStatus) ->
 %% @end
 set_options(Statname, NewOpts) when is_list(NewOpts) ->
   lists:foreach(fun({Key, NewVal}) ->
-  set_options(Statname, {Key, NewVal})
+    set_options(Statname, {Key, NewVal})
                 end, NewOpts);
 set_options(Statname, {Key, NewVal}) ->
   case check_meta(Statname) of
@@ -159,7 +163,7 @@ set_options(Statname, {Key, NewVal}) ->
     unregistered ->
       io:fwrite("Stat is unregistered: ~p~n", [Statname]);
     {Type, Opts, Aliases} ->
-     NewOpts = lists:keyreplace(Key, 1, Opts, {Key, NewVal}),
+      NewOpts = lists:keyreplace(Key, 1, Opts, {Key, NewVal}),
       NewOpts2 = fresh_clock(NewOpts),
       set_options(Statname, Type, NewOpts2, Aliases)
   end.
@@ -187,8 +191,15 @@ reset_stat(Statname) ->
   end.
 
 fresh_clock(Opts) ->
-  {value, {vclock, [{Node, {Count, _VC}}]}} = lists:keysearch(vclock, 1, Opts),
-  lists:keyreplace(vclock, 1, Opts, {vclock, clock_fresh(Node, Count)}).
+  case lists:keysearch(vclock, 1, Opts) of
+    false ->
+      [{vclock, clock_fresh(?NODEID, 0)} | Opts];
+    {value, {vclock, [{Node, {Count, _VC}}]}} ->
+      lists:keyreplace(vclock, 1, Opts, {vclock, clock_fresh(Node, Count)});
+    _ ->
+      [{vclock, clock_fresh(?NODEID, 0)} | Opts]
+  end.
+
 
 reset_inc(Count) -> Count + 1.
 
@@ -300,14 +311,14 @@ change_stat_status(Profile, Stats) ->
   MetaStats = get_profile_stats(Profile),
   ChangeStatus =
     lists:foldl(fun(Stat, StatsAcc) ->
-  case check_prof_meta(Profile, Stat) of
-    [{Key, disabled}] ->
-      [{Key, {status, enabled}} | StatsAcc];
-    [{Key, enabled}] ->
-      [{Key, {status, disabled}} | StatsAcc];
-    _ ->
-      StatsAcc
-  end end, [], Stats),
+      case check_prof_meta(Profile, Stat) of
+        [{Key, disabled}] ->
+          [{Key, {status, enabled}} | StatsAcc];
+        [{Key, enabled}] ->
+          [{Key, {status, disabled}} | StatsAcc];
+        _ ->
+          StatsAcc
+      end end, [], Stats),
   change_these_stats(ChangeStatus),
   FinalStats = the_alpha_stat(ChangeStatus, MetaStats),
   add_profile(Profile, FinalStats).
@@ -316,7 +327,7 @@ get_profile_stats(ProfileName) ->
   riak_core_metadata:get({riak_stat, ?PROF}, ProfileName).
 
 add_stat(ProfileName, Stats) ->
- MetaStats = get_profile_stats(ProfileName),
+  MetaStats = get_profile_stats(ProfileName),
   FinalStats = the_alpha_stat(Stats, meta_keyer(MetaStats)),
   change_these_stats(FinalStats),
   add_profile(ProfileName, FinalStats).
@@ -324,14 +335,14 @@ add_stat(ProfileName, Stats) ->
 stat_remover(ProfileName, Stats) ->
   MetaStats = get_profile_stats(ProfileName),
   EnabledStats =
-  lists:foldl(fun(Stat, EnabledAcc) ->
-    case check_prof_meta(ProfileName, Stat) of
-      [{Key, disabled}] ->
-        [{Key, {status, enabled}} | EnabledAcc];
-      _ ->
-        EnabledAcc
-    end end, [], Stats),
-    change_these_stats(EnabledStats),
+    lists:foldl(fun(Stat, EnabledAcc) ->
+      case check_prof_meta(ProfileName, Stat) of
+        [{Key, disabled}] ->
+          [{Key, {status, enabled}} | EnabledAcc];
+        _ ->
+          EnabledAcc
+      end end, [], Stats),
+  change_these_stats(EnabledStats),
   FinalStats = the_alpha_stat(EnabledStats, MetaStats),
   add_profile(ProfileName, FinalStats).
 
@@ -340,7 +351,7 @@ the_alpha_stat(Stats1, Stats2) ->
 
 meta_keyer(Stats) ->
   lists:map(fun({Key, Value}) ->
-          meta_keyer(Key, Value)
+    meta_keyer(Key, Value)
             end, Stats).
 
 meta_keyer(Key, Value) ->

@@ -1,5 +1,5 @@
 %%%-------------------------------------------------------------------
-%%% @copyright (C) 2019, <COMPANY>
+%%% @copyright (C) 2019,
 %%% @doc
 %%%
 %%% June 2019 update ->
@@ -12,7 +12,7 @@
 %%%-------------------------------------------------------------------
 -module(riak_stat_assist_mgr).
 
--export([print_stats/2]).
+-export([print_stats/2, print_stats0/1,just_print/1, just_print/2]).
 %% API
 -export([find_entries/2]).
 
@@ -49,7 +49,46 @@ print_stats({Entries, _}, Attrs) ->
   lists:foreach(
     fun({N, _, _}) ->
       print_info_1(N, Attrs)
-    end, Entries).
+    end, Entries);
+%%print_stats([{Entries, DPS}], Att) ->
+%%  print_stats({Entries, DPS}, Att);
+print_stats(Data, Att) ->
+  print_stats({[{Data, [], []}],[]}, Att).
+
+print_stats0(Stats) ->
+  lists:foldl(
+    fun(Stat, Acc) ->
+      case prin_stat0(Stat) of
+        {_H, disabled, _} ->
+          Acc;
+        {H, Status, _} ->
+          [{H, Status} | Acc]
+%%        {_H, _S, []} ->
+%%          Acc;
+%%        {_H, _S, _V} ->
+%%          Acc
+      end
+%%      [prin_stat0(Stat) | Acc]
+    end, [], Stats
+  ).
+
+prin_stat0(Stat) ->
+  H = lists:flatten(io_lib:fwrite("~p: ", [Stat])),
+%%  Pad = lists:duplicate(length(H), $\s),
+  Info = get_info(core, Stat),
+  Status = io:fwrite("~w = ~p~n", [status, proplists:get_value(status, Info, enabled)]),
+  Value = io:fwrite("~w = ~p~n", [value, proplists:get_value(value, Info)]),
+%%  io:put_chars([H, Status, Value]).
+  {H, Status, Value}.
+
+just_print(Stats) ->
+  io:fwrite("Stats ~p~n~n",[length(Stats)]),
+  lists:foreach(fun({Stat, _Val}) ->
+    print_stats(find_entries(Stat, enabled), [value])
+                end, Stats).
+just_print(Stat, Status) ->
+  io:fwrite("~p: ~p~n", [Stat, Status]).
+
 
 % used to print the entire stat information
 print_info_1(N, [A | Attrs]) ->
@@ -76,7 +115,12 @@ get_value(E, _Status, DPs) ->
   end.
 
 get_info(Name, Info) ->
-  riak_stat_mngr:get_info(Name, Info).
+  case riak_stat_mngr:get_info(Name, Info) of
+    undefined ->
+      [];
+    Other ->
+      Other
+  end.
 
 aliases(Type, Entries) ->
   riak_stat_mngr:aliases(Type, Entries).
@@ -91,6 +135,7 @@ get_datapoint(Name, DP) ->
 %% pulls the information of a stat out of exometer
 %% @end
 find_entries(Arg, ToStatus) ->
+  lager:error("Arg: ~p ToStatus: ~p~n", [Arg, ToStatus]),
   lists:map(
     fun(A) ->
       {S, Type, Status, DPs} = type_status_and_dps(A, ToStatus),
@@ -108,8 +153,12 @@ find_entries(Arg, ToStatus) ->
     end, Arg).
 
 type_status_and_dps(S, ToStatus) ->
+  lager:error("S: ~p ToStatus: ~p~n", [S, ToStatus]),
+%%  [S1|Rest] = re:split(S, "/", [{return, list}]),
   [S1|Rest] = re:split(S, "/"),
+  lager:error("S1: ~p Rest: ~p~n", [S1, Rest]),
   {Type, Status, DPs} = type_status_and_dps(Rest, '_', ToStatus, default),
+  lager:error("Type: ~p Status: ~p DPs: ~p~n", [Type, Status, DPs]),
   {S1, Type, Status, DPs}.
 
 type_status_and_dps([<<"type=", T/binary>>|Rest], _Type, ToStatus, DPs) ->

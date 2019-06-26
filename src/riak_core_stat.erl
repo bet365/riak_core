@@ -29,10 +29,10 @@
 %% API
 -export([start_link/0, get_stats/0, get_stats/1,
   get_values/1, get_value/1, update/1,
-         register_stats/0, vnodeq_stats/0,
-	 register_stats/2,
-	 register_vnode_stats/3, unregister_vnode_stats/2,
-	 vnodeq_stats/1, prefix/0]).
+  register_stats/0, vnodeq_stats/0,
+  register_stats/2,
+  register_vnode_stats/3, unregister_vnode_stats/2,
+  vnodeq_stats/1, prefix/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -83,7 +83,10 @@ register_vnode_stats(Module, Index, Pid) ->
       match, {'_', value} }}]},
 
   RegisterStats = [Stat1, Stat2, Stat3],
-    riak_stat_mngr:register_vnode_stats(?APP, RegisterStats).
+    riak_stat_mngr:register_stats(?APP, RegisterStats).
+
+%% TODO: add the [] for options and these can be registered the same way,
+
 
 unregister_vnode_stats(Module, Index) ->
     riak_stat_mngr:unregister_stats(Module, Index, vnodeq, ?APP).

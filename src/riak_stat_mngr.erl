@@ -20,39 +20,19 @@
 
 -behaviour(gen_server).
 
-%%%%%%% TODO %%%%%%
-
-% Todo: talk to Dine and Coxxy about persisting exometer data, is it something that
-% we need to implement an easy method for someone to get to.
-% i.e. storing data down to disk for a month then it is delete, or a week.
-% e.g. if a node goes down and you want to see how long it takes for it to load back up
-% or what the CPU or memory usage was or is you can riak-admin show "on-call" and it
-% will show stats most useful for that profile.
-
-
-%%% MANAGER
-
-% Todo: create profiles for individual teams for riak, these profiles can be stored in the metadata
-% so when a certain profile is requested, it pulls down the list of stats names from metadata
-% and then prints stats info for those stats
-%
-% possible profiles: stress testing puts, gets, deletes, on-call, bets, system, node, cluster.
-
-
-%%% EXOM
 % Todo: add vclocks to the stats that are added in when they are registered
 
 % Todo: add vclocks to the stats when they are reset also
 
-% Todo: write a function that deletes the stats data from exometer
-
 %%%%%% EXPORTED FUNCTIONS %%%%%%
 
+%% General API
 -export([
   register_stats/2, register_vnode_stats/2,
   get_stats/1, get_info/2, get_datapoint/2, get_value/1, get_values/1,
   update_or_create/4, unregister_stats/4, reset_stats/1]).
 
+%% Profile API
 -export([
   load_profile/1, reset_profiles/0,
   add_profile/1, add_profile_stat/1,
@@ -81,7 +61,9 @@
 -export([
   start/0, stop/0, get_datapoints/2, get_datapoints/3, get_val_fol/4,
   notify/3, delete_metric/1, vnodeq_atom/2, prefix/0, the_alpha_stat/2,
-  meta_keyer/2, sanitise/1, change_these_stats/1]).
+  meta_keyer/2, sanitise/1, change_these_stats/1, timestamp/0, stat_name/3]).
+
+-export([counter/1, history/2, gauge/1]).
 
 -export([start_link/0]).
 %% gen_server callbacks
@@ -93,16 +75,18 @@
   code_change/3]).
 
 %%%%% MACROS %%%%%%
+
 -define(SERVER, ?MODULE).
 -define(STAT, stats).
-
+-define(TIMEOUT, 60000).
+-define(time, vclock:fresh()). %% Todo: decide if we want a timestamp or vclock
+-define(timestamp, timestamp()).
 
 %%%%% RECORDS %%%%%
 -record(state, {
   method = lww,     % lww is the default
-  profile, % profiles that include the {Profile, [Stats]}
-  aggr = false}).     % default decision for stats, turn aggregation off.
-% Todo: turn Aggr on and off
+  profile}). % profiles that include the {Profile, [Stats]}
+%%  aggr = false}).     % default decision for stats, turn aggregation off. % TODO: Do we need this aggr?
 
 %%%%% @doc %%%%%
 
@@ -128,12 +112,14 @@
 %%           are enabled then the only stats you want returning will
 %%           be stored will that profile.
 %%
+
 %% aggr -- true | false
 %%         stats are aggregated when needed or called in the riak shell
 %%         some are aggregated by default when returned in stat info,
 %%         this allows extra functionality to see the specific stats in
 %%         detail automatically.
 %%
+
 %% @end
 
 %%%===================================================================
@@ -142,7 +128,8 @@
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%% GENERAL %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
--spec(register_stats(App :: atom(), Stats :: term()) -> term() | ok).
+-spec(register_stats(App :: atom(), Stats :: term()) ->
+  {error, Reason :: term()} | ok).
 %% @doc
 %% All stats that get registered go through metadata first, the status
 %% of the stats already registered is checked and returned to exometer
@@ -152,17 +139,20 @@
 %% given to exometer can set the status when it is registered.
 %% preventing the stats having to be manually enabled/disabled on
 %% start up.
+%%
+%% Exometer registration returns -> ok unless there is an {error, Reason}
 %% @end
 register_stats(App, Stats) ->
-  gen_server:call(?SERVER, {register, App, Stats}).
+  gen_server:call(?MODULE, {register, App, Stats}).
 
+%% Now unused, as the data for vnode stats has been altered to fit register stats
 -spec(register_vnode_stats(App :: atom(), Stats :: list()) -> ok | term()).
 %% @doc
 %% vnode stats are from riak_core_stat and require a different type of
 %% registration
 %% @end
 register_vnode_stats(App, Stats) ->
-  gen_server:cast(?SERVER, {vnode_stats, App, Stats}).
+  gen_server:call(?SERVER, {vnode_stats, App, Stats}).
 
 -spec(get_stats(App :: atom()) -> term()).
 %% @doc
@@ -172,7 +162,8 @@ register_vnode_stats(App, Stats) ->
 %% get_stats/1 can be used to retrieve stats in a particular path not just app.
 %% @end
 get_stats(App) ->
-  gen_server:call(?SERVER, {get_app_stats, App}).
+  Values = gen_server:call(?SERVER, {get_app_stats, App}),
+  [print_stats(Name, [status]) || {Name, _V} <- Values].
 
 -spec(get_info(Name :: term(), Info :: term()) -> term()).
 %% @doc
@@ -326,14 +317,16 @@ check_profile_stat(Stat) ->
 %% otherwise use: riak-admin stat show-enabled | show-disabled
 %% @end
 show_stat(Arg, Status) ->
-  gen_server:call(?SERVER, {show, Arg, Status}).
+  Reply = gen_server:call(?SERVER, {show, Arg, Status}),
+  print_stats(Reply, []).
 
 -spec(stat0(Arg :: term()) -> term()).
 %% @doc
 %% Check which stats in exometer are not updating, only checks enabled
 %% @end
 stat0(Arg) ->
-  gen_server:call(?SERVER, {stat0, Arg}).
+  NotUpdating = gen_server:call(?SERVER, {stat0, Arg}),
+  print(NotUpdating).
 
 -spec(disable0(Arg :: term()) -> term()).
 %% @doc
@@ -348,14 +341,16 @@ disable0(Arg) ->
 %% Returns all the stats informtation
 %% @end
 stat_info(Arg) ->
-  gen_server:call(?SERVER, {info_stat, Arg}).
+  {Attrs, RestArg} = gen_server:call(?SERVER, {info_stat, Arg}),
+  [print_stats(E, Attrs) || E <- find_entries(RestArg, '_')].
 
 -spec(stat_change(Arg :: term(), ToStatus :: atom()) -> term()).
 %% @doc
 %% change the status of the stat in metadata and in exometer
 %% @end
 stat_change(Arg, ToStatus) ->
-  gen_server:call(?SERVER, {change_status, Arg, ToStatus}).
+  OldStatus = gen_server:call(?SERVER, {change_status, Arg, ToStatus}),
+  responder(Arg, OldStatus, fun change_status/2, ToStatus).
 
 -spec(reset_stat(Arg :: term()) -> term()).
 %% @doc
@@ -363,8 +358,8 @@ stat_change(Arg, ToStatus) ->
 %% has been reset
 %% @end
 reset_stat(Arg) ->
-  gen_server:call(?SERVER, {reset, Arg}).
-
+%%  gen_server:call(?SERVER, {reset, Arg}).
+  responder(Arg, enabled, fun reset_stats/2, []).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%% METADATA %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -374,7 +369,7 @@ reset_stat(Arg) ->
 %% registers the stats in metadata if they aren't already there, If they are
 %% there it returns the status options for exometer to put.
 %%
-%% If a stat has the option {unregistered, true} it will return 0, which will
+%% If a stat has the option {unregistered, true} it will
 %% be ignored going into exometer.
 %% @end
 register_meta_stats(Statname, Type, Opts, Aliases) ->
@@ -400,7 +395,10 @@ check_meta_status(Arg, Status) ->
 %% Checks the information for that stat in the metadata
 %% @end
 check_meta_info(Arg) ->
-  [riak_stat_meta_mgr:check_meta(Name) || {{Name, _, _S}, _DPs} <- find_entries(Arg, '_')].
+%%  [
+    riak_stat_meta_mgr:check_meta(Arg)
+%%    || {{Name, _, _S}, _DPs} <- find_entries(Arg, '_')]
+.
 
 -spec(change_meta_status(Name :: term(), ToStatus :: atom()) -> ok | term()).
 %% @doc
@@ -527,6 +525,15 @@ stop() ->
 
 %% Used as exometer_folsom in riak_core_exo_monitor
 
+counter(Name) ->
+  riak_stat_exom_mgr:new_counter(Name).
+
+history(Name, Len) ->
+  riak_stat_exom_mgr:new_history(Name, Len).
+
+gauge(Name) ->
+  riak_stat_exom_mgr:new_gauge(Name).
+
 get_datapoints(Name, Type) ->
   riak_stat_exom_mgr:get_datapoints(Name, Type).
 get_datapoints(Name, Type, Opts) ->
@@ -575,10 +582,12 @@ init([]) ->
 %%% GENERAL %%%
 
 handle_call({register, App, Stats}, _From, State) ->
-  lists:foreach(fun(Stat) ->
+  Reply = lists:foreach(fun(Stat) ->
     register_stat(prefix(), App, Stat)
                 end, Stats),
-  {reply, ok, State};
+  {reply, Reply, State};
+
+%% TODO: get rid of this function, it has been made redundant
 handle_call({vnode_stats, App, Stats}, _From, State) ->
   lists:foreach(fun
                   ({Stat, Type, Alias}) ->
@@ -587,29 +596,30 @@ handle_call({vnode_stats, App, Stats}, _From, State) ->
                     register_stats(App, [{Stat, Type}])
                 end, Stats),
   {reply, ok, State};
+
+
 handle_call({get_app_stats, App}, _From, State) ->
   Values = get_values([prefix(), App]),
   {reply, Values, State};
 handle_call({update, App, Name, UpdateVal, Type}, _From, State) ->
   StatName = stat_name(prefix(), App, Name),
-  Reply =
     case check_meta_info(StatName) of
       undefined ->
         register_meta_stats(StatName, Type, [], []),
-        update_exom_stats(StatName, UpdateVal, Type),
-        ok;
+        update_exom_stats(StatName, UpdateVal, Type);
       {{_NI, _S}, StatName, {Type, Opts, _Aliases}} ->
-        update_exom_stats(StatName, UpdateVal, Type, Opts),
+        update_exom_stats(StatName, UpdateVal, Type, Opts);
+      _ ->
         ok
     end,
-  {reply, Reply, State};
+  {reply, ok, State};
 handle_call({get_datapoint, Name, DataPoint}, _From, State) ->
   Value =
     riak_stat_exom_mgr:get_datapoint(Name, DataPoint),
   {reply, Value, State};
 handle_call({unregister, Mod, Index, Type, App}, _From, State) ->
-  Reply = unreg_stats(App, Type, Mod, Index),
-  {reply, Reply, State};
+  unreg_stats(App, Type, Mod, Index),
+  {reply, ok, State};
 %%handle_call({method, Method}, _From, State = #state{}) ->
 %%  Method0 = method(Method),
 %%  {Response, Arg} =
@@ -622,33 +632,32 @@ handle_call({unregister, Mod, Index, Type, App}, _From, State) ->
 %%  Reply = io:fwrite(Response, [Arg]),
 %%  {reply, Reply, State#state{method = Arg}};
 
-%%% CONSOLE %%%
+% CONSOLE %%%
 
 handle_call({show, Arg, Status}, _From, State = #state{}) ->
-  print_stats(find_entries(Arg, Status), []),
-  {reply, Status, State};
-handle_call({stat0, Arg}, _From, State) ->
-  {NotUpdating, _Updating} = not_updating(Arg),
-  Reply = [io:fwrite("~p~n", [Name]) || {Name, _Val} <- NotUpdating],
+  Reply = find_entries(Arg, Status),
   {reply, Reply, State};
+handle_call({stat0, Arg}, _From, State) ->
+  io:fwrite("Arg: ~p~n", [Arg]),
+  not_updating(Arg),
+%%  io:fwrite("NotUpdata: ~p Updating : ~p~n", [NotUpdating, _Updating]),
+  {reply, ok, State};
 handle_call({disable0, Arg}, _From, State) ->
   {NotUpdating, _Updating} = not_updating(Arg),
-  [stat_change(Name, disabled) || {Name, _Val} <- NotUpdating], % todo: stat changes the metadata too
+  [stat_change(Name, disabled) || {Name, _Val} <- NotUpdating],
   {reply, ok, State};
 handle_call({info_stat, Arg}, _From, State) ->
-  {Attrs, RestArg} = pick_info_attrs(split_arg(Arg)),
-  {reply, [print_stats(E, Attrs) || E <- find_entries(RestArg, '_')], State};
-handle_call({change_status, Arg, ToStatus}, _From, State) ->
+  {reply, pick_info_attrs(split_arg(Arg)), State};
+handle_call({change_status, _Arg, ToStatus}, _From, State) ->
   OldStatus = case ToStatus of
                 enabled -> disabled;
                 disabled -> enabled;
                 _ -> '_'
               end,
-  responder(Arg, OldStatus, fun change_status/2, ToStatus),
-  {reply, ok, State};
-handle_call({reset, Arg}, _From, State) ->
-  responder(Arg, enabled, fun reset_stats/2, []),
-  {reply, ok, State};
+  {reply, OldStatus, State};
+%%handle_call({reset, Arg}, _From, State) ->
+%%  responder(Arg, enabled, fun reset_stats/2, []),
+%%  {reply, ok, State};
 
 
 %%% EXOMETER %%%
@@ -725,6 +734,76 @@ handle_call(_Request, _From, State) ->
   {noreply, NewState :: #state{}} |
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
+
+%%handle_cast({register, App, Stats}, State) ->
+%%  lists:foreach(fun(Stat) ->
+%%    register_stat(prefix(), App, Stat)
+%%                end, Stats),
+%%  {noreply, State};
+%%handle_cast({vnode_stats, App, Stats}, State) ->
+%%  lists:foreach(fun
+%%                  ({Stat, Type, Alias}) ->
+%%                    register_stats(App, [{Stat, Type, [], Alias}]);
+%%                  ({Stat, Type}) ->
+%%                    register_stats(App, [{Stat, Type}])
+%%                end, Stats),
+%%  {noreply, State};
+%%handle_cast({get_app_stats, App}, State) ->
+%%  Values = get_values([prefix(), App]),
+%%  io:fwrite("~p~n", [Values]),
+%%  {noreply, State};
+%%handle_cast({update, App, Name, UpdateVal, Type}, State) ->
+%%  StatName = stat_name(prefix(), App, Name),
+%%  case check_meta_info(StatName) of
+%%    undefined ->
+%%      register_meta_stats(StatName, Type, [], []),
+%%      update_exom_stats(StatName, UpdateVal, Type);
+%%    {{_NI, _S}, StatName, {Type, Opts, _Aliases}} ->
+%%      update_exom_stats(StatName, UpdateVal, Type, Opts);
+%%    _ ->
+%%      ok
+%%  end,
+%%  {noreply, State};
+%%handle_cast({get_datapoint, Name, DataPoint}, State) ->
+%%  Value =
+%%    riak_stat_exom_mgr:get_datapoint(Name, DataPoint),
+%%  io:fwrite("~p~n", [Value]),
+%%  {noreply, State};
+%%handle_cast({unregister, Mod, Index, Type, App}, State) ->
+%%  unreg_stats(App, Type, Mod, Index),
+%%  {noreply, State};
+%%
+%%
+%%handle_cast({show, Arg, Status}, State = #state{}) ->
+%%  Reply = print_stats(find_entries(Arg, Status), []),
+%%  io:fwrite("~p~n", [Reply]),
+%%  {noreply, State};
+%%handle_cast({stat0, Arg}, State) ->
+%%  {NotUpdating, _Updating} = not_updating(Arg),
+%%  Reply = [io:fwrite("~p~n", [Name]) || {Name, _Val} <- NotUpdating],
+%%  io:fwrite("~p~n", [Reply]),
+%%  {noreply, State};
+%%handle_cast({disable0, Arg}, State) ->
+%%  {NotUpdating, _Updating} = not_updating(Arg),
+%%  [stat_change(Name, disabled) || {Name, _Val} <- NotUpdating], % todo: stat changes the metadata too
+%%  {noreply, State};
+%%handle_cast({info_stat, Arg}, State) ->
+%%  {Attrs, RestArg} = pick_info_attrs(split_arg(Arg)),
+%%  [print_stats(E, Attrs) || E <- find_entries(RestArg, '_')],
+%%  {noreply, State};
+%%handle_cast({change_status, Arg, ToStatus}, State) ->
+%%  OldStatus = case ToStatus of
+%%                enabled -> disabled;
+%%                disabled -> enabled;
+%%                _ -> '_'
+%%              end,
+%%  responder(Arg, OldStatus, fun change_status/2, ToStatus),
+%%  {noreply, State};
+%%handle_cast({reset, Arg}, State) ->
+%%  responder(Arg, enabled, fun reset_stats/2, []),
+%%  {noreply, State};
+
+
 handle_cast({alias, Arg}, State) ->
   riak_stat_exom_mgr:alias(Arg),
   {noreply, State};
@@ -765,6 +844,9 @@ prefix() ->
 
 vnodeq_atom(Service, Desc) ->
   binary_to_atom(<<(atom_to_binary(Service, latin1))/binary, Desc/binary>>, latin1).
+
+timestamp() ->
+  riak_stat_exom_mgr:timestamp().
 
 %%%===================================================================
 %%% Register Stats
@@ -849,11 +931,27 @@ change_these_stats(Stats) ->
 %%% Update stats
 %%%===================================================================
 
+%% Todo: move this to the assitant manager, use the same function as
+%% print_info_1 to get the value, and when the value = [] the send to the
+%% normal print_stats with Attrs [status, value].
+
 not_updating(Arg) ->
-  lists:foldl(fun({Name, []}, {Nil, Ok}) -> {[{Name, []} | Nil], Ok};
-    ({Name, Val}, {Nil, Ok}) -> {Nil, [{Name, Val} | Ok]}
-              end, {[], []},
-    [{E, get_info(E, value)} || {{E, _, _S}, _DP} <- find_entries(Arg, enabled)]).
+  {{Entries, _, _S}, _DPs} = find_entries(Arg, enabled),
+  riak_stat_assist_mgr:print_stats0(Entries).
+%%  io:fwrite("Entries ~p ~n", [Entries]),
+%%  lists:foldl(fun
+%%                ({Name, []}, {Nil, Ok}) -> {[{Name, []} | Nil], Ok};
+%%                ({Name, 0}, {Nil, Ok}) -> {[{Name, []} | Nil], Ok};
+%%                ({Name, undefined}, {Nil, Ok}) -> {[{Name, []} | Nil], Ok};
+%%                ({Name, Val}, {Nil, Ok}) -> {Nil, [{Name, Val} | Ok]}
+%%              end, {[], []},
+%%    [{E, get_info(E, value)} || {{E, _, _S}, _DP} <- Entries]).
+
+print(Arg) ->
+  riak_stat_assist_mgr:just_print(Arg).
+
+%%print(Arg, Status) ->
+%%  riak_stat_assist_mgr:just_print(Arg, Status).
 
 %%%===================================================================
 %%% Delete/reset Stats
@@ -873,7 +971,8 @@ unreg_from_both(StatName) ->
     unregistered ->
       unreg_exom_stat(StatName);
     _ ->
-      lager:debug("riak_stat_mngr:unreg_both -- could not unregister from meta~n")
+      lager:debug("riak_stat_mngr:unreg_both -- could not unregister from meta~n"),
+      ok
   end.
 
 % Extra in the case of change status is the new status

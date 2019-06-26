@@ -59,7 +59,11 @@ init([]) ->
                    permanent, 30000, supervisor, [riak_ensemble_sup]},
 
     Children = lists:flatten(
-                 [?CHILD(riak_core_bg_manager, worker),
+                 [?CHILD(riak_stat_mngr, worker),
+%%                   ?CHILD(riak_stat_assist_mgr, worker),
+%%                   ?CHILD(riak_stat_meta_mgr, worker),
+%%                   ?CHILD(riak_stat_exom_mgr, worker),
+                   ?CHILD(riak_core_bg_manager, worker),
                   ?CHILD(riak_core_sysmon_minder, worker),
                   ?CHILD(riak_core_vnode_sup, supervisor, 305000),
                   ?CHILD(riak_core_eventhandler_sup, supervisor),

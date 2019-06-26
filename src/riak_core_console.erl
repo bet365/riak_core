@@ -1176,13 +1176,15 @@ stat_show(Arg) ->
 %% riak-admin stat enabled riak.** % shows enabled stats etc
 %% @end
 stat_enabled(Arg, enabled) ->
-    riak_stat_mngr:show_stat(Arg, enabled).
+%%    riak_stat_mngr:show_stat(Arg, enabled).
+    to_coordinator({Arg, enabled}, {console, stat_show}).
 -spec(stat_disabled(Arg :: term(), Status :: atom()) -> ok | term()).
 %% @doc
 %% same as above but will display disabled stats
 %% @end
 stat_disabled(Arg, disabled) ->
-    riak_stat_mngr:show_stat(Arg, disabled).
+%%    riak_stat_mngr:show_stat(Arg, disabled).
+    to_coordinator({Arg, disabled}, {console, stat_disabled}).
 
 -spec(stat_0(Arg :: term()) -> ok | term()).
 %% @doc
@@ -1192,7 +1194,8 @@ stat_disabled(Arg, disabled) ->
 %% behaves similar to stat show/info
 %% @end
 stat_0(Arg) ->
-    riak_stat_mngr:stat0(Arg).
+%%    riak_stat_mngr:stat0(Arg).
+    to_coordinator(Arg, {console, stat_show_0}).
 
 -spec(stat_disable_0(Arg :: term()) -> ok | term()).
 %% @doc
@@ -1200,35 +1203,40 @@ stat_0(Arg) ->
 %% updating as well
 %% @end
 stat_disable_0(Arg) ->
-    riak_stat_mngr:disable0(Arg).
+%%    riak_stat_mngr:disable0(Arg).
+    to_coordinator(Arg, {console, stat_disable_0}).
 
 -spec(stat_enable(Arg :: term()) -> ok | term()).
 %% @doc
 %% enable the stats
 %% @end
 stat_enable(Arg) ->
-    riak_stat_mngr:stat_change(Arg, enabled).
+%%    riak_stat_mngr:stat_change(Arg, enabled).
+    to_coordinator(Arg, {console, stat_enable}).
 
 -spec(stat_disable(Arg :: term()) -> ok | term()).
 %% @doc
 %% disable the stats
 %% @end
 stat_disable(Arg) ->
-    riak_stat_mngr:stat_change(Arg, disabled).
+%%    riak_stat_mngr:stat_change(Arg, disabled).
+    to_coordinator(Arg, {console, stat_disable}).
 
 -spec(stat_reset(Arg :: term()) -> ok | term()).
 %% @doc
 %% resets the stats
 %% @end
 stat_reset(Arg) ->
-    riak_stat_mngr:reset_stat(Arg).
+%%    riak_stat_mngr:reset_stat(Arg).
+    to_coordinator(Arg, {console, stat_reset}).
 
 -spec(stat_info(Arg :: term()) -> ok | term()).
 %% @doc
 %% information on the stat
 %% @end
 stat_info(Arg) ->
-    riak_stat_mngr:stat_info(Arg).
+%%    riak_stat_mngr:stat_info(Arg).
+    to_coordinator(Arg, {console, stat_info}).
 
 %%%% PROFILES %%%%
 
@@ -1238,7 +1246,8 @@ stat_info(Arg) ->
 %% in exometer and in the metadata
 %% @end
 load_profile(FileName) ->
-    riak_stat_mngr:load_profile(FileName).
+%%    riak_stat_mngr:load_profile(FileName).
+    to_coordinator(FileName, {profiles, load_profile}).
 
 -spec(add_profile(FileName :: term()) -> term()).
 %% @doc
@@ -1251,29 +1260,33 @@ load_profile(FileName) ->
 %%
 %% @end
 add_profile(FileName) ->
-    riak_stat_mngr:add_profile(FileName).
+%%    riak_stat_mngr:add_profile(FileName).
+    to_coordinator(FileName, {profiles, add_profile}).
 
 -spec(add_stat(Stat :: term()) -> ok | term()).
 %% @doc
 %% add a stat to the list of enabled or disabled stats in the profiles metadata
 %% @end
 add_stat(Stat) ->
-    riak_stat_mngr:add_profile_stat(Stat).
+%%    riak_stat_mngr:add_profile_stat(Stat).
+    to_coordinator(Stat, {profiles, add_profile_stat}).
 
 -spec(remove_profile(FileName :: term()) -> term()).
 %% @doc
 %% remove the profile from the metadata if it is not longer necessary
 %% @end
 remove_profile(FileName) ->
-    riak_stat_mngr:remove_profile(FileName).
+%%    riak_stat_mngr:remove_profile(FileName).
+    to_coordinator(FileName, {profiles, remove_profile}).
 
 -spec(remove_stat(StatName :: term()) -> term()).
 %% @doc
 %% remove the stat from the metadata profile, will be from the profile currently
 %% loaded
 %% @end
-remove_stat(StatName) ->
-    riak_stat_mngr:remove_profile_stat(StatName).
+remove_stat(Stat) ->
+%%    riak_stat_mngr:remove_profile_stat(StatName).
+    to_coordinator(Stat, {profiles, remove_profile_stat}).
 
 -spec(change_profile_stat(Arg :: term()) -> ok | term()).
 %% @doc
@@ -1283,14 +1296,16 @@ remove_stat(StatName) ->
 %% metadata
 %% @end
 change_profile_stat(Arg) ->
-    riak_stat_mngr:change_profile_stat(Arg).
+%%    riak_stat_mngr:change_profile_stat(Arg).
+    to_coordinator(Arg, {profiles, change_profile_stat}).
 
 -spec(check_profile_stat(Arg :: term()) -> ok | term()).
 %% @doc
 %% check what the status of a stat is in the currently loaded profile
 %% @end
 check_profile_stat(Arg) ->
-    riak_stat_mngr:check_profile_stat(Arg).
+%%    riak_stat_mngr:check_profile_stat(Arg).
+    to_coordinator(Arg, {profiles, check_profile_stat}).
 
 -spec(reset_profile(Arg :: term()) -> term()).
 reset_profile(_Arg) ->
@@ -1300,4 +1315,8 @@ reset_profile(_Arg) ->
 %% unloads from the current profile, so all the stats are re-enabled.
 %% @end
 reset_profile() ->
-    riak_stat_mngr:reset_profiles().
+%%    riak_stat_mngr:reset_profiles().
+    to_coordinator([], {profiles, reset_profile}).
+
+to_coordinator(Arg, Type) ->
+    riak_stat_coordinator:coordinate(Arg, Type).
