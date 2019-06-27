@@ -59,19 +59,20 @@ register_stats() ->
 %% @spec register_stats(App, Stats) -> ok
 %% @doc (Re-)Register a list of metrics for App.
 register_stats(App, Stats) ->
-    riak_stat_mngr:register_stats(App, Stats).
+  riak_stat_coordinator:coordinate(admin, {register, {App, Stats}}).
+%%    riak_stat_mngr:register_stats(App, Stats).
 
 register_vnode_stats(Module, Index, Pid) ->
   F = fun riak_stat_mngr:vnodeq_atom/2,
   Stat1 =  {[vnodes_running, Module],
     { function, exometer, select_count,
       [[{ {[vnodeq, Module, '_'], '_', '_'},
-        [], [true] }]], match, value },
+        [], [true] }]], match, value }, [],
     [{aliases, [{value, F(Module, <<"s_running">>)}]}]},
 
   Stat2 = {[vnodeq, Module],
     {function, riak_core_stat, vnodeq_stats, [Module],
-      histogram, [mean,median,min,max,total]},
+      histogram, [mean,median,min,max,total]},[],
     [{aliases, [{mean  , F(Module, <<"q_mean">>)},
       {median, F(Module, <<"q_median">>)},
       {min   , F(Module, <<"q_min">>)},
@@ -83,7 +84,8 @@ register_vnode_stats(Module, Index, Pid) ->
       match, {'_', value} }}]},
 
   RegisterStats = [Stat1, Stat2, Stat3],
-    riak_stat_mngr:register_stats(?APP, RegisterStats).
+  riak_stat_coordinator:coordinate(admin, {register, {?APP, RegisterStats}}).
+%%    riak_stat_mngr:register_stats(?APP, RegisterStats).
 
 %% TODO: add the [] for options and these can be registered the same way,
 
@@ -98,7 +100,8 @@ get_stats() ->
     get_stats(?APP).
 
 get_stats(App) -> % can also be the stat name instead of App
-    riak_stat_mngr:get_stats(App).
+  riak_stat_coordinator:coordinate(exometer, {read, App}).
+%%    riak_stat_mngr:get_stats(App).
 
 get_value(Stat) ->
   riak_stat_mngr:get_value(Stat).
@@ -119,7 +122,10 @@ handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
 handle_cast({update, Arg}, State) ->
-  riak_stat_mngr:update_or_create(?APP, update_metric(Arg), update_value(Arg), update_type(Arg)),
+  riak_stat_coordinator:coordinate(exometer,
+    {update, {lists:flatten(
+      [?PFX, ?APP | [update_metric(Arg)]]), update_value(Arg), update_type(Arg)}}),
+%%  riak_stat_mngr:update_or_create(?APP, update_metric(Arg), update_value(Arg), update_type(Arg)),
     {noreply, State};
 handle_cast(_Req, State) ->
     {noreply, State}.

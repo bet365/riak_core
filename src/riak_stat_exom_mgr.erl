@@ -197,7 +197,6 @@ stop() ->
 %%% exometer - folsom
 %%%-------------------------------------------------------------------
 
-
 %% TODO: move everything towards exometer, remove all the folsom functions
 get_datapoints(Name, Type) ->
   get_datapoints(Name, Type, []).

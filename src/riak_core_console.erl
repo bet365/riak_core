@@ -1169,20 +1169,20 @@ parse_cidr(CIDR) ->
 %% riak-admin stat show riak.**
 %% @end
 stat_show(Arg) ->
-    stat_enabled(Arg, enabled).
+    consoling(Arg, enabled).
 
 -spec(stat_enabled(Arg :: term(), Status :: atom()) -> ok | term()).
 %% @doc
 %% riak-admin stat enabled riak.** % shows enabled stats etc
 %% @end
 stat_enabled(Arg, enabled) ->
-    to_coordinator({Arg, enabled}, {console, stat_show}).
+    consoling({Arg, enabled}, stat_show).
 -spec(stat_disabled(Arg :: term(), Status :: atom()) -> ok | term()).
 %% @doc
 %% same as above but will display disabled stats
 %% @end
 stat_disabled(Arg, disabled) ->
-    to_coordinator({Arg, disabled}, {console, stat_disabled}).
+    consoling({Arg, disabled}, stat_disabled).
 
 -spec(stat_0(Arg :: term()) -> ok | term()).
 %% @doc
@@ -1192,7 +1192,7 @@ stat_disabled(Arg, disabled) ->
 %% behaves similar to stat show/info
 %% @end
 stat_0(Arg) ->
-    to_coordinator(Arg, {console, stat_show_0}).
+    consoling(Arg, stat_show_0).
 
 -spec(stat_disable_0(Arg :: term()) -> ok | term()).
 %% @doc
@@ -1200,36 +1200,35 @@ stat_0(Arg) ->
 %% updating as well
 %% @end
 stat_disable_0(Arg) ->
-    to_coordinator(Arg, {console, stat_disable_0}).
+    consoling(Arg, stat_disable_0).
 
 -spec(stat_enable(Arg :: term()) -> ok | term()).
 %% @doc
 %% enable the stats
 %% @end
 stat_enable(Arg) ->
-    to_coordinator(Arg, {console, stat_enable}).
+    consoling(Arg, stat_enable).
 
 -spec(stat_disable(Arg :: term()) -> ok | term()).
 %% @doc
 %% disable the stats
 %% @end
 stat_disable(Arg) ->
-%%    riak_stat_mngr:stat_change(Arg, disabled).
-    to_coordinator(Arg, {console, stat_disable}).
+    consoling(Arg, stat_disable).
 
 -spec(stat_reset(Arg :: term()) -> ok | term()).
 %% @doc
 %% resets the stats
 %% @end
 stat_reset(Arg) ->
-    to_coordinator(Arg, {console, stat_reset}).
+    consoling(Arg, stat_reset).
 
 -spec(stat_info(Arg :: term()) -> ok | term()).
 %% @doc
 %% information on the stat
 %% @end
 stat_info(Arg) ->
-    to_coordinator(Arg, {console, stat_info}).
+    consoling(Arg, stat_info).
 
 %%%% PROFILES %%%%
 
@@ -1239,7 +1238,7 @@ stat_info(Arg) ->
 %% in exometer and in the metadata
 %% @end
 load_profile(FileName) ->
-    to_coordinator(FileName, {profiles, load_profile}).
+    profiling(FileName, load_profile).
 
 -spec(add_profile(FileName :: term()) -> term()).
 %% @doc
@@ -1252,21 +1251,21 @@ load_profile(FileName) ->
 %%
 %% @end
 add_profile(FileName) ->
-    to_coordinator(FileName, {profiles, add_profile}).
+    profiling(FileName, add_profile).
 
 -spec(add_stat(Stat :: term()) -> ok | term()).
 %% @doc
 %% add a stat to the list of enabled or disabled stats in the profiles metadata
 %% @end
 add_stat(Stat) ->
-    to_coordinator(Stat, {profiles, add_profile_stat}).
+    profiling(Stat, add_profile_stat).
 
 -spec(remove_profile(FileName :: term()) -> term()).
 %% @doc
 %% remove the profile from the metadata if it is not longer necessary
 %% @end
 remove_profile(FileName) ->
-    to_coordinator(FileName, {profiles, remove_profile}).
+    profiling(FileName, remove_profile).
 
 -spec(remove_stat(StatName :: term()) -> term()).
 %% @doc
@@ -1274,7 +1273,7 @@ remove_profile(FileName) ->
 %% loaded
 %% @end
 remove_stat(Stat) ->
-    to_coordinator(Stat, {profiles, remove_profile_stat}).
+    profiling(Stat, remove_profile_stat).
 
 -spec(change_profile_stat(Arg :: term()) -> ok | term()).
 %% @doc
@@ -1284,14 +1283,14 @@ remove_stat(Stat) ->
 %% metadata
 %% @end
 change_profile_stat(Arg) ->
-    to_coordinator(Arg, {profiles, change_profile_stat}).
+    profiling(Arg, change_profile_stat).
 
 -spec(check_profile_stat(Arg :: term()) -> ok | term()).
 %% @doc
 %% check what the status of a stat is in the currently loaded profile
 %% @end
 check_profile_stat(Arg) ->
-    to_coordinator(Arg, {profiles, check_profile_stat}).
+    profiling(Arg, check_profile_stat).
 
 -spec(reset_profile(Arg :: term()) -> term()).
 reset_profile(_Arg) ->
@@ -1301,7 +1300,12 @@ reset_profile(_Arg) ->
 %% unloads from the current profile, so all the stats are re-enabled.
 %% @end
 reset_profile() ->
-    to_coordinator([], {profiles, reset_profile}).
+    profiling(reset_profile).
 
-to_coordinator(Arg, Type) ->
-    riak_stat_coordinator:coordinate(Arg, Type).
+profiling(Func) ->
+    profiling([], Func).
+profiling(Arg, Func) ->
+    riak_stat_profiles:coordinate(Func, Arg).
+
+consoling(Arg, Func) ->
+    riak_stat_console:coordinate(Func, Arg).
