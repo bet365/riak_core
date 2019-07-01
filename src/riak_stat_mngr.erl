@@ -86,7 +86,8 @@
 -record(state, {
   method = lww,     % lww is the default
   profile}). % profiles that include the {Profile, [Stats]}
-%%  aggr = false}).     % default decision for stats, turn aggregation off. % TODO: Do we need this aggr?
+%%  aggr = false}).     % default decision for stats, turn aggregation off.
+%% % TODO: Do we need this aggr?
 
 %%%%% @doc %%%%%
 
@@ -154,6 +155,7 @@ register_stats(App, Stats) ->
 register_vnode_stats(App, Stats) ->
   gen_server:call(?SERVER, {vnode_stats, App, Stats}).
 
+%% now sent as a read function to exometer - it is basically get_values
 -spec(get_stats(App :: atom()) -> term()).
 %% @doc
 %% In riak attach the function get_stats() can be called to retrieve all
@@ -785,7 +787,8 @@ handle_call(_Request, _From, State) ->
 %%  {noreply, State};
 %%handle_cast({disable0, Arg}, State) ->
 %%  {NotUpdating, _Updating} = not_updating(Arg),
-%%  [stat_change(Name, disabled) || {Name, _Val} <- NotUpdating], % todo: stat changes the metadata too
+%%  [stat_change(Name, disabled) || {Name, _Val} <- NotUpdating],
+%% % todo: stat changes the metadata too
 %%  {noreply, State};
 %%handle_cast({info_stat, Arg}, State) ->
 %%  {Attrs, RestArg} = pick_info_attrs(split_arg(Arg)),
@@ -931,7 +934,7 @@ change_these_stats(Stats) ->
 %%% Update stats
 %%%===================================================================
 
-%% Todo: move this to the assitant manager, use the same function as
+%% Todo: move this to the assistant manager, use the same function as
 %% print_info_1 to get the value, and when the value = [] the send to the
 %% normal print_stats with Attrs [status, value].
 
@@ -1058,7 +1061,11 @@ find_disabled(String, Dir) ->
   find_(String, "{disabled,", Dir).
 
 find_(String, Search, Dir) ->
-  string:find(String, Search, Dir).
+  string:find(String, Search, Dir). %% adapted from otp 20.0
+
+
+
+
 
 search_for(String, enabled) ->
   find_enabled(String, trailing);

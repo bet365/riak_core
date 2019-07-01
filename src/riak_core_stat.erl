@@ -47,7 +47,7 @@
 -define(SERVER, ?MODULE).
 
 -define(APP, riak_core).
--define(PFX, prefix()).
+-define(PFX, riak_stat:prefix()).
 
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
@@ -59,11 +59,11 @@ register_stats() ->
 %% @spec register_stats(App, Stats) -> ok
 %% @doc (Re-)Register a list of metrics for App.
 register_stats(App, Stats) ->
-  riak_stat_coordinator:coordinate(admin, {register, {App, Stats}}).
+  riak_stat:register(App, Stats).
 %%    riak_stat_mngr:register_stats(App, Stats).
 
 register_vnode_stats(Module, Index, Pid) ->
-  F = fun riak_stat_mngr:vnodeq_atom/2,
+  F = fun vnodeq_atom/2,
   Stat1 =  {[vnodes_running, Module],
     { function, exometer, select_count,
       [[{ {[vnodeq, Module, '_'], '_', '_'},
@@ -84,14 +84,14 @@ register_vnode_stats(Module, Index, Pid) ->
       match, {'_', value} }}]},
 
   RegisterStats = [Stat1, Stat2, Stat3],
-  riak_stat_coordinator:coordinate(admin, {register, {?APP, RegisterStats}}).
-%%    riak_stat_mngr:register_stats(?APP, RegisterStats).
+  riak_stat:register(?APP, RegisterStats).
 
-%% TODO: add the [] for options and these can be registered the same way,
-
+vnodeq_atom(Service, Desc) ->
+  binary_to_atom(<<(atom_to_binary(Service, latin1))/binary, Desc/binary>>, latin1).
 
 unregister_vnode_stats(Module, Index) ->
-    riak_stat_mngr:unregister_stats(Module, Index, vnodeq, ?APP).
+%%    riak_stat_mngr:unregister_stats(Module, Index, vnodeq, ?APP).
+  riak_stat:unregister(Module, Index, vnodeq, ?APP).
 
 
 %% @spec get_stats() -> proplist()
@@ -100,14 +100,15 @@ get_stats() ->
     get_stats(?APP).
 
 get_stats(App) -> % can also be the stat name instead of App
-  riak_stat_coordinator:coordinate(exometer, {read, App}).
+  riak_stat:get_app_stats(App).
 %%    riak_stat_mngr:get_stats(App).
 
 get_value(Stat) ->
-  riak_stat_mngr:get_value(Stat).
+  riak_stat:get_value(Stat).
 
 get_values(Path) ->
-  riak_stat_mngr:get_values(Path).
+%%  riak_stat_mngr:get_values(Path).
+  riak_stat:get_values(Path).
 
 update(Arg) ->
     gen_server:cast(?SERVER, {update, Arg}).
@@ -122,10 +123,8 @@ handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
 handle_cast({update, Arg}, State) ->
-  riak_stat_coordinator:coordinate(exometer,
-    {update, {lists:flatten(
-      [?PFX, ?APP | [update_metric(Arg)]]), update_value(Arg), update_type(Arg)}}),
-%%  riak_stat_mngr:update_or_create(?APP, update_metric(Arg), update_value(Arg), update_type(Arg)),
+  riak_stat:update(lists:flatten(
+      [?PFX, ?APP | [update_metric(Arg)]]), update_value(Arg), update_type(Arg)),
     {noreply, State};
 handle_cast(_Req, State) ->
     {noreply, State}.
@@ -237,14 +236,10 @@ vnodeq_aggregate(Service, MQLs0) ->
                  1 ->
                      lists:nth(Len div 2 + 1, MQLs)
              end,
-    [{[?PFX, riak_core, riak_stat_mngr:vnodeq_atom(Service,<<"s_running">>)], [{value, Len}]},
-     {[?PFX, riak_core, riak_stat_mngr:vnodeq_atom(Service,<<"q">>)],
+    [{[?PFX, riak_core, vnodeq_atom(Service,<<"s_running">>)], [{value, Len}]},
+     {[?PFX, riak_core, vnodeq_atom(Service,<<"q">>)],
       [{min, lists:nth(1, MQLs)}, {median, Median}, {mean, Mean},
        {max, lists:nth(Len, MQLs)}, {total, Total}]}].
-
-prefix() ->
-  riak_stat_mngr:prefix().
-
 
 -ifdef(TEST).
 
