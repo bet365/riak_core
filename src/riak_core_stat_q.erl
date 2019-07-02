@@ -46,7 +46,7 @@
 -type stat_name() :: list().
 -type stat_value() :: integer() | [tuple()].
 
--define(PFX, riak_core_stat:prefix()).
+-define(PFX, riak_stat:prefix()).
 
 %% @doc To allow for namespacing, and adding richer dimensions, stats
 %% are named with a tuple key. The key (like `{riak_kv, node, gets}' or

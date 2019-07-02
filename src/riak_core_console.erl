@@ -32,8 +32,8 @@
          print_groups/1, print_group/1, print_grants/1,
          security_enable/1, security_disable/1, security_status/1, ciphers/1,
 
-	       stat_show/1, stat_0/1, stat_disable_0/1,
-         stat_enabled/2, stat_disabled/2, stat_info/1,
+	       stat_show/2, stat_0/1, stat_disable_0/1,
+         stat_enabled/1, stat_disabled/1, stat_info/1,
          stat_enable/1, stat_disable/1, stat_reset/1,
 
          load_profile/1, add_profile/1, add_stat/1,
@@ -1163,26 +1163,26 @@ parse_cidr(CIDR) ->
 %%% Stats
 %%%-------------------------------------------------------------------
 
--spec(stat_show(Arg :: term()) -> ok | term()).
+-spec(stat_show(Arg :: term(), Status :: atom()) -> ok | term()).
 %% @doc
 %% Automatically shows the enabled stats for
 %% riak-admin stat show riak.**
 %% @end
-stat_show(Arg) ->
-    consoling(Arg, enabled).
+stat_show(Arg, Status) ->
+    riak_stat:show_stat_status(Arg, Status).
 
--spec(stat_enabled(Arg :: term(), Status :: atom()) -> ok | term()).
+-spec(stat_enabled(Arg :: term()) -> ok | term()).
 %% @doc
 %% riak-admin stat enabled riak.** % shows enabled stats etc
 %% @end
-stat_enabled(Arg, enabled) ->
-    consoling({Arg, enabled}, stat_show).
--spec(stat_disabled(Arg :: term(), Status :: atom()) -> ok | term()).
+stat_enabled(Arg) ->
+    stat_show(Arg, enabled).
+-spec(stat_disabled(Arg :: term()) -> ok | term()).
 %% @doc
 %% same as above but will display disabled stats
 %% @end
-stat_disabled(Arg, disabled) ->
-    consoling({Arg, disabled}, stat_disabled).
+stat_disabled(Arg) ->
+    stat_show(Arg, disabled).
 
 -spec(stat_0(Arg :: term()) -> ok | term()).
 %% @doc
@@ -1192,7 +1192,7 @@ stat_disabled(Arg, disabled) ->
 %% behaves similar to stat show/info
 %% @end
 stat_0(Arg) ->
-    consoling(Arg, stat_show_0).
+    riak_stat:show_stat_0(Arg).
 
 -spec(stat_disable_0(Arg :: term()) -> ok | term()).
 %% @doc
@@ -1200,37 +1200,45 @@ stat_0(Arg) ->
 %% updating as well
 %% @end
 stat_disable_0(Arg) ->
-    consoling(Arg, stat_disable_0).
+    riak_stat:disable_stat_0(Arg).
 
 -spec(stat_enable(Arg :: term()) -> ok | term()).
 %% @doc
 %% enable the stats
 %% @end
 stat_enable(Arg) ->
-    consoling(Arg, stat_enable).
+    riak_stat:change_stat_status(Arg, enabled).
 
 -spec(stat_disable(Arg :: term()) -> ok | term()).
 %% @doc
 %% disable the stats
 %% @end
 stat_disable(Arg) ->
-    consoling(Arg, stat_disable).
+    riak_stat:change_stat_status(Arg, disabled).
 
 -spec(stat_reset(Arg :: term()) -> ok | term()).
 %% @doc
 %% resets the stats
 %% @end
 stat_reset(Arg) ->
-    consoling(Arg, stat_reset).
+    riak_stat:reset_stat(Arg).
 
 -spec(stat_info(Arg :: term()) -> ok | term()).
 %% @doc
 %% information on the stat
 %% @end
 stat_info(Arg) ->
-    consoling(Arg, stat_info).
+    riak_stat:show_stat_info(Arg).
 
 %%%% PROFILES %%%%
+
+%% TODO 03/07/2019
+
+% mpove all these into the profiles folder, move eerything out of the
+% riak core stat modules and then delete them
+% then you can go and QA the code and redo it.
+% Organise first.
+% .
 
 -spec(load_profile(FileName :: term()) -> term()).
 %% @doc

@@ -340,7 +340,7 @@ disable0(Arg) ->
 
 -spec(stat_info(Arg :: term()) -> term()).
 %% @doc
-%% Returns all the stats informtation
+%% Returns all the stats information
 %% @end
 stat_info(Arg) ->
   {Attrs, RestArg} = gen_server:call(?SERVER, {info_stat, Arg}),

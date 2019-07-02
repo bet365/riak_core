@@ -32,7 +32,7 @@
   register_stats/0, vnodeq_stats/0,
   register_stats/2,
   register_vnode_stats/3, unregister_vnode_stats/2,
-  vnodeq_stats/1, prefix/0]).
+  vnodeq_stats/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -60,7 +60,6 @@ register_stats() ->
 %% @doc (Re-)Register a list of metrics for App.
 register_stats(App, Stats) ->
   riak_stat:register(App, Stats).
-%%    riak_stat_mngr:register_stats(App, Stats).
 
 register_vnode_stats(Module, Index, Pid) ->
   F = fun vnodeq_atom/2,
