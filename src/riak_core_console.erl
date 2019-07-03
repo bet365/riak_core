@@ -36,9 +36,8 @@
          stat_enabled/1, stat_disabled/1, stat_info/1,
          stat_enable/1, stat_disable/1, stat_reset/1,
 
-         load_profile/1, add_profile/1, add_stat/1,
-         change_profile_stat/1, check_profile_stat/1,
-         remove_profile/1, remove_stat/1, reset_profile/0, reset_profile/1]).
+         load_profile/1, add_profile/1,
+         remove_profile/1, reset_profile/0, reset_profile/1]).
 
 %% New CLI API
 -export([command/1]).
@@ -1232,21 +1231,13 @@ stat_info(Arg) ->
 
 %%%% PROFILES %%%%
 
-%% TODO 03/07/2019
-
-% mpove all these into the profiles folder, move eerything out of the
-% riak core stat modules and then delete them
-% then you can go and QA the code and redo it.
-% Organise first.
-% .
-
 -spec(load_profile(FileName :: term()) -> term()).
 %% @doc
 %% Loads the profile of that name, and then will enable/disable all the stats
 %% in exometer and in the metadata
 %% @end
-load_profile(FileName) ->
-    profiling(FileName, load_profile).
+load_profile(ProfileName) ->
+    riak_stat:load_profile(ProfileName).
 
 -spec(add_profile(FileName :: term()) -> term()).
 %% @doc
@@ -1258,47 +1249,47 @@ load_profile(FileName) ->
 %% {disabled, [riak.riak_api.**]}
 %%
 %% @end
-add_profile(FileName) ->
-    profiling(FileName, add_profile).
+add_profile(ProfileName) ->
+    riak_stat:save_current_profile(ProfileName).
 
--spec(add_stat(Stat :: term()) -> ok | term()).
-%% @doc
-%% add a stat to the list of enabled or disabled stats in the profiles metadata
-%% @end
-add_stat(Stat) ->
-    profiling(Stat, add_profile_stat).
+%%-spec(add_stat(Stat :: term()) -> ok | term()).
+%%%% @doc
+%%%% add a stat to the list of enabled or disabled stats in the profiles metadata
+%%%% @end
+%%add_stat(Stat) ->
+%%    profiling(Stat, add_profile_stat).
 
 -spec(remove_profile(FileName :: term()) -> term()).
 %% @doc
 %% remove the profile from the metadata if it is not longer necessary
 %% @end
-remove_profile(FileName) ->
-    profiling(FileName, remove_profile).
+remove_profile(ProfileName) ->
+    riak_stat:delete_profile(ProfileName).
 
--spec(remove_stat(StatName :: term()) -> term()).
-%% @doc
-%% remove the stat from the metadata profile, will be from the profile currently
-%% loaded
-%% @end
-remove_stat(Stat) ->
-    profiling(Stat, remove_profile_stat).
+%%-spec(remove_stat(StatName :: term()) -> term()).
+%%%% @doc
+%%%% remove the stat from the metadata profile, will be from the profile currently
+%%%% loaded
+%%%% @end
+%%remove_stat(Stat) ->
+%%    riak(Stat, remove_profile_stat).
 
--spec(change_profile_stat(Arg :: term()) -> ok | term()).
+%%-spec(change_profile_stat(Arg :: term()) -> ok | term()).
 %% @doc
 %% changes the status of a stat in the current profile, it is in the format of
 %% riak.riak_kv.node.gets.** etc...
 %% whatever the current stat is set to it will change it to the opposite in the
 %% metadata
 %% @end
-change_profile_stat(Arg) ->
-    profiling(Arg, change_profile_stat).
+%%change_profile_stat(Arg) ->
+%%    profiling(Arg, change_profile_stat).
 
--spec(check_profile_stat(Arg :: term()) -> ok | term()).
-%% @doc
-%% check what the status of a stat is in the currently loaded profile
-%% @end
-check_profile_stat(Arg) ->
-    profiling(Arg, check_profile_stat).
+%%-spec(check_profile_stat(Arg :: term()) -> ok | term()).
+%%%% @doc
+%%%% check what the status of a stat is in the currently loaded profile
+%%%% @end
+%%check_profile_stat(Arg) ->
+%%    profiling(Arg, check_profile_stat).
 
 -spec(reset_profile(Arg :: term()) -> term()).
 reset_profile(_Arg) ->
@@ -1308,12 +1299,4 @@ reset_profile(_Arg) ->
 %% unloads from the current profile, so all the stats are re-enabled.
 %% @end
 reset_profile() ->
-    profiling(reset_profile).
-
-profiling(Func) ->
-    profiling([], Func).
-profiling(Arg, Func) ->
-    riak_stat_profiles:coordinate(Func, Arg).
-
-consoling(Arg, Func) ->
-    riak_stat_console:coordinate(Func, Arg).
+    riak_stat:reset_stats_and_profile().
