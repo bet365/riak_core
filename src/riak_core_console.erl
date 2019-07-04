@@ -1191,7 +1191,7 @@ stat_disabled(Arg) ->
 %% behaves similar to stat show/info
 %% @end
 stat_0(Arg) ->
-    riak_stat:show_stat_0(Arg).
+    riak_stat:show_static_stats(Arg).
 
 -spec(stat_disable_0(Arg :: term()) -> ok | term()).
 %% @doc
