@@ -364,8 +364,6 @@ vnode_command(Sender, Request, State=#state{mod=Mod,
             {stop, Reason, State#state{modstate=NewModState}};
         {error, Reason, _NewModState} ->
             reply(Sender, {fail, Index, Reason}),
-%%            ModState1 = ModState#state{modstate = NewModState},
-%%            {stop, normal, State}
             continue(State, ModState)
     end.
 

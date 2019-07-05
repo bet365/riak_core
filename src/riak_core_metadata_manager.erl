@@ -350,6 +350,8 @@ init([Opts]) ->
                          {stop, term(), term(), #state{}} |
                          {stop, term(), #state{}}.
 handle_call({put, PKey, Context, ValueOrFun}, _From, State) ->
+    io:format("metadata put handle:call======~n"),
+    lager:info("metadata put handle:call======~n"),
     {Result, NewState} = read_modify_write(PKey, Context, ValueOrFun, State),
     {reply, Result, NewState};
 handle_call({merge, PKey, Obj}, _From, State) ->

@@ -17,17 +17,20 @@ start_manager(Node) ->
     TreeDir = Dir ++ "/trees",
     {ok, Tree} = riak_core_metadata_hashtree:start_link(TreeDir),
     {ok, Bcst} = riak_core_broadcast:start_link([node()], [], [], []),
+    {ok, Evts} = riak_core_metadata_events:start_link(),
+    unlink(Evts),
     unlink(Bcst),
     unlink(Tree),
     unlink(Mgr),
 
     application:set_env(riak_core, permissions, [{riak_kv,[get,put]}]),
-    {Mgr, Tree, Bcst}.
+    {Mgr, Tree, Bcst, Evts}.
 
-stop_manager({Mgr, Tree, Bcst}) ->
+stop_manager({Mgr, Tree, Bcst, Evts}) ->
     catch exit(Mgr, kill),
     catch exit(Tree, kill),
     catch exit(Bcst, kill),
+    catch exit(Evts, kill),
     ok.
 
 security_test_() ->
