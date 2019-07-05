@@ -1252,44 +1252,12 @@ load_profile(ProfileName) ->
 add_profile(ProfileName) ->
     riak_stat:save_current_profile(ProfileName).
 
-%%-spec(add_stat(Stat :: term()) -> ok | term()).
-%%%% @doc
-%%%% add a stat to the list of enabled or disabled stats in the profiles metadata
-%%%% @end
-%%add_stat(Stat) ->
-%%    profiling(Stat, add_profile_stat).
-
 -spec(remove_profile(FileName :: term()) -> term()).
 %% @doc
 %% remove the profile from the metadata if it is not longer necessary
 %% @end
 remove_profile(ProfileName) ->
     riak_stat:delete_profile(ProfileName).
-
-%%-spec(remove_stat(StatName :: term()) -> term()).
-%%%% @doc
-%%%% remove the stat from the metadata profile, will be from the profile currently
-%%%% loaded
-%%%% @end
-%%remove_stat(Stat) ->
-%%    riak(Stat, remove_profile_stat).
-
-%%-spec(change_profile_stat(Arg :: term()) -> ok | term()).
-%% @doc
-%% changes the status of a stat in the current profile, it is in the format of
-%% riak.riak_kv.node.gets.** etc...
-%% whatever the current stat is set to it will change it to the opposite in the
-%% metadata
-%% @end
-%%change_profile_stat(Arg) ->
-%%    profiling(Arg, change_profile_stat).
-
-%%-spec(check_profile_stat(Arg :: term()) -> ok | term()).
-%%%% @doc
-%%%% check what the status of a stat is in the currently loaded profile
-%%%% @end
-%%check_profile_stat(Arg) ->
-%%    profiling(Arg, check_profile_stat).
 
 -spec(reset_profile(Arg :: term()) -> term()).
 reset_profile(_Arg) ->
