@@ -28,7 +28,7 @@
 
 %% API
 -export([start_link/0, get_stats/0, get_stats/1,
-  get_values/1, get_value/1, update/1,
+  get_stats_status/0, get_stats_info/0, update/1,
   register_stats/0, vnodeq_stats/0,
   register_stats/2,
   register_vnode_stats/3, unregister_vnode_stats/2,
@@ -100,14 +100,12 @@ get_stats() ->
 
 get_stats(App) -> % can also be the stat name instead of App
   riak_stat:get_app_stats(App).
-%%    riak_stat_mngr:get_stats(App).
 
-get_value(Stat) ->
-  riak_stat:get_value(Stat).
+get_stats_status() ->
+  riak_stat:get_stats_status(?APP).
 
-get_values(Path) ->
-%%  riak_stat_mngr:get_values(Path).
-  riak_stat:get_values(Path).
+get_stats_info() ->
+  riak_stat:get_stats_info(?APP).
 
 update(Arg) ->
     gen_server:cast(?SERVER, {update, Arg}).
