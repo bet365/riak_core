@@ -350,8 +350,6 @@ init([Opts]) ->
                          {stop, term(), term(), #state{}} |
                          {stop, term(), #state{}}.
 handle_call({put, PKey, Context, ValueOrFun}, _From, State) ->
-    io:format("metadata put handle:call======~n"),
-    lager:info("metadata put handle:call======~n"),
     {Result, NewState} = read_modify_write(PKey, Context, ValueOrFun, State),
     {reply, Result, NewState};
 handle_call({merge, PKey, Obj}, _From, State) ->
@@ -567,7 +565,7 @@ store({FullPrefix, Key}=PKey, Metadata, State) ->
     ets:insert(ets_tab(FullPrefix), Objs),
     riak_core_metadata_hashtree:insert(PKey, Hash),
     ok = dets_insert(dets_tabname(FullPrefix), Objs),
-    riak_core_metadata_events:metadata_update({PKey, Metadata}),
+    propogate_events({PKey, Metadata}),
     {Metadata, State}.
 
 read({FullPrefix, Key}) ->
@@ -686,3 +684,8 @@ default_data_root() ->
         {ok, PRoot} -> filename:join(PRoot, "cluster_meta");
         undefined -> undefined
     end.
+
+propogate_events({{{split_backend, _BackendType}, Key}, _Metadata} = FullKey) when Key =/= default andalso Key =/= use_default_backend ->
+    riak_core_metadata_events:metadata_update(FullKey);
+propogate_events(_) ->
+    ok.
