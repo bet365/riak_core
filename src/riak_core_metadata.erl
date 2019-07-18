@@ -63,7 +63,9 @@
 -type iterator()            :: {riak_core_metadata_manager:metadata_iterator(), it_opts()}.
 
 %% Put Option Types
--type put_opts()            :: [].
+-type put_propogate_event() :: {propogate_event, boolean()}.
+-type put_opt()             :: put_propogate_event().
+-type put_opts()            :: [put_opt()].
 
 %% Delete Option types
 -type delete_opts()         :: [].
@@ -310,12 +312,12 @@ put(FullPrefix, Key, ValueOrFun) ->
           metadata_key(),
           metadata_value() | metadata_modifier(),
           put_opts()) -> ok.
-put({Prefix, SubPrefix}=FullPrefix, Key, ValueOrFun, _Opts)
+put({Prefix, SubPrefix}=FullPrefix, Key, ValueOrFun, Opts)
   when (is_binary(Prefix) orelse is_atom(Prefix)) andalso
        (is_binary(SubPrefix) orelse is_atom(SubPrefix)) ->
     PKey = prefixed_key(FullPrefix, Key),
     CurrentContext = current_context(PKey),
-    Updated = riak_core_metadata_manager:put(PKey, CurrentContext, ValueOrFun),
+    Updated = riak_core_metadata_manager:put(PKey, CurrentContext, ValueOrFun, Opts),
     broadcast(PKey, Updated).
 
 %% @doc same as delete(FullPrefix, Key, [])
