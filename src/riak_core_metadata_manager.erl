@@ -574,7 +574,8 @@ store({FullPrefix, Key}=PKey, Metadata, Opts, State) ->
     ets:insert(ets_tab(FullPrefix), Objs),
     riak_core_metadata_hashtree:insert(PKey, Hash),
     ok = dets_insert(dets_tabname(FullPrefix), Objs),
-    case proplists:get_value(propogate_event, Opts, false) of
+    %% TODO Remove this flag. It only propogates the event to the local node if set to default to false due to the broadcast mechanism of MD
+    case proplists:get_value(propogate_event, Opts, true) of
         true ->
             propogate_events({PKey, Metadata});
         false ->

@@ -66,6 +66,7 @@ init([Fn]) ->
 	{ok, #state { callback = Fn }}.
 
 handle_event({metadata_update, MetaData}, State) ->
+	lager:info("Firing Event to vnode"),
 	(State#state.callback)(MetaData),
 	{ok, State}.
 
