@@ -551,7 +551,9 @@ iterator_match(KeyMatch) ->
 
 read_modify_write(PKey, Context, ValueOrFun, Opts, State=#state{serverid=ServerId}) ->
     Existing = read(PKey),
+    lager:info("ValueorFun: ~p~n", [ValueOrFun]),
     Modified = riak_core_metadata_object:modify(Existing, Context, ValueOrFun, ServerId),
+    lager:info("Modified: ~p~n", [Modified]),
     store(PKey, Modified, Opts, State).
 
 read_merge_write(PKey, Obj, State) ->
@@ -701,8 +703,10 @@ default_data_root() ->
     end.
 
 propogate_events({{{split_backend, BackendType}, Key}, Metadata} = _FullKey) when Key =/= default andalso Key =/= use_default_backend ->
-    lager:info("manager metadata put : ~p~n", [riak_core_metadata_object:value(Metadata)]),
-    LatestSplit = hd(riak_core_metadata_object:value(Metadata)),
-    riak_core_metadata_events:metadata_update({LatestSplit, BackendType});
+%%    LatestSplit = hd(riak_core_metadata_object:value(Metadata)),
+    lager:info("MD about to be propegated: ~p~n", [Metadata]),
+    lager:info("propogating event to put type and bucket: ~p~n", [{BackendType, Key}]),
+    lager:info("Metadata value to be propogated: ~p~n", [riak_core_metadata_object:value(Metadata)]),
+    riak_core_metadata_events:metadata_update({Key, BackendType}, Metadata);
 propogate_events(_) ->
     ok.

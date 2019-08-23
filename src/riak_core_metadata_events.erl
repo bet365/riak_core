@@ -19,7 +19,7 @@
 	add_callback/1,
 	add_sup_callback/1,
 	add_guarded_callback/1,
-	metadata_update/1
+	metadata_update/2
 ]).
 
 %% gen_event callbacks
@@ -53,8 +53,8 @@ add_sup_callback(Fn) when is_function(Fn) ->
 add_guarded_callback(Fn) when is_function(Fn) ->
 	riak_core:add_guarded_event_handler(?MODULE, {?MODULE, make_ref()}, [Fn]).
 
-metadata_update(MetaData) ->
-	gen_event:notify(?MODULE, {metadata_update, MetaData}).
+metadata_update(Key, Metadata) ->
+	gen_event:notify(?MODULE, {metadata_update, {Key, Metadata}}).
 
 %% ===================================================================
 %% gen_event callbacks
