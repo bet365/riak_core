@@ -40,6 +40,14 @@
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
+-ifdef(deprecated_21).
+ssl_handshake(Socket, SslOpts) ->
+    ssl:handshake(Socket, SslOpts).
+-else.
+ssl_handshake(Socket, SslOpts) ->
+    ssl:ssl_accept(Socket, SslOpts).
+-endif.
+
 
 maybe_use_ssl(App) ->
     SSLOpts = [
@@ -51,6 +59,7 @@ maybe_use_ssl(App) ->
                 {App, get_my_common_name(app_helper:get_env(App, certfile,
                                                        undefined))}}},
         {verify, verify_peer},
+        {server_name_indication, disable},
         {fail_if_no_peer_cert, true},
         {secure_renegotiate, true} %% both sides are erlang, so we can force this
     ],
@@ -127,7 +136,7 @@ upgrade_server_to_ssl(Socket, App) ->
         false ->
             {error, no_ssl_config};
         Config ->
-            ssl:ssl_accept(Socket, Config)
+            ssl_handshake(Socket, Config)
     end.
 
 load_certs(undefined) ->

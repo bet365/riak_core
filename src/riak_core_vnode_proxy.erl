@@ -20,7 +20,7 @@
 -export([start_link/2, init/1, reg_name/2, reg_name/3, call/2, call/3, cast/2,
          unregister_vnode/3, command_return_vnode/2, overloaded/1]).
 -export([system_continue/3, system_terminate/4, system_code_change/4]).
-
+-export([soft_load_mailbox_check/2]).
 -include("riak_core_vnode.hrl").
 
 -ifdef(TEST).
@@ -29,8 +29,8 @@
 
 -record(state, {mod                    :: atom(),
                 index                  :: partition(),
-                vnode_pid              :: pid(),
-                vnode_mref             :: reference(),
+                vnode_pid              :: pid() | undefined,
+                vnode_mref             :: reference() | undefined,
                 check_mailbox          :: non_neg_integer(),
                 check_threshold        :: pos_integer() | undefined,
                 check_counter          :: non_neg_integer(),
@@ -39,6 +39,8 @@
                 check_request          :: undefined | sent | ignore
                }).
 
+%% NOTE: changed down to 50 for gh1661 soft-limits on vnode mailbox
+-define(DEFAULT_CHECK_REQUEST_INTERVAL, 50).
 -define(DEFAULT_CHECK_INTERVAL, 5000).
 -define(DEFAULT_OVERLOAD_THRESHOLD, 10000).
 
@@ -64,7 +66,7 @@ init([Parent, RegName, Mod, Index]) ->
                                   ?DEFAULT_CHECK_INTERVAL),
     RequestInterval = app_helper:get_env(riak_core,
                                          vnode_check_request_interval,
-                                         Interval div 2),
+                                         ?DEFAULT_CHECK_REQUEST_INTERVAL),
     Threshold = app_helper:get_env(riak_core,
                                    vnode_overload_threshold,
                                    ?DEFAULT_OVERLOAD_THRESHOLD),
@@ -159,11 +161,15 @@ loop(Parent, State) ->
 %% @private
 handle_call({return_vnode, Req}, _From, State) ->
     {Pid, NewState} = get_vnode_pid(State),
-    gen_fsm:send_event(Pid, Req),
+    gen_fsm_compat:send_event(Pid, Req),
     {reply, {ok, Pid}, NewState};
 handle_call(overloaded, _From, State=#state{check_mailbox=Mailbox,
                                             check_threshold=Threshold}) ->
     Result = (Mailbox > Threshold),
+    {reply, Result, State};
+handle_call(mailbox_size, _From, State=#state{check_mailbox=Mailbox,
+					      check_request_interval=CRI}) ->
+    Result = soft_load_mailbox_check(Mailbox, CRI),
     {reply, Result, State};
 handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
@@ -172,7 +178,7 @@ handle_call(_Msg, _From, State) ->
 handle_cast({unregister_vnode, Pid}, State) ->
     %% The pid may not match the vnode_pid in the state, but we must send the
     %% unregister event anyway -- the vnode manager requires it.
-    gen_fsm:send_event(Pid, unregistered),
+    gen_fsm_compat:send_event(Pid, unregistered),
     catch demonitor(State#state.vnode_mref, [flush]),
     NewState = forget_vnode(State),
     {noreply, NewState};
@@ -187,6 +193,11 @@ handle_cast({vnode_proxy_pong, Ref, Msgs}, State=#state{check_request=RequestSta
                        State
                end,
     {noreply, NewState};
+handle_cast({mailbox_size, From, Tag}, State=#state{check_mailbox=Mailbox,
+					      check_request_interval=CRI}) ->
+    Result = soft_load_mailbox_check(Mailbox, CRI),
+    From ! {mbox, {Tag, Result}},
+    {noreply, State};
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -309,6 +320,13 @@ send_proxy_ping(Pid, MailboxSizeAfterPing) ->
     Ref = make_ref(),
     Pid ! {'$vnode_proxy_ping', self(), Ref, MailboxSizeAfterPing},
     Ref.
+
+%% @private moved into it's own function for call and cast (and for
+%% intercepting in riak-test)
+soft_load_mailbox_check(MBox, Interval) when MBox < Interval *2 ->
+    {ok, MBox, Interval};
+soft_load_mailbox_check(MBox, Interval) ->
+    {soft_loaded, MBox, Interval}.
 
 -ifdef(TEST).
 

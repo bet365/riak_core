@@ -157,7 +157,7 @@
 -endif. % TEST
 
 -ifdef(EQC).
--export([prop_correct/0]).
+-export([prop_correct/0, prop_sha/0, prop_est/0]).
 -include_lib("eqc/include/eqc.hrl").
 -endif.
 
@@ -241,21 +241,26 @@ new() ->
 
 -spec new({index(), tree_id_bin() | non_neg_integer()}) -> hashtree().
 new(TreeId) ->
-    State = new_segment_store([], #state{}),
-    new(TreeId, State, []).
+    {DB, Path} = new_segment_store([]),
+    new(TreeId, DB, Path, []).
 
 -spec new({index(), tree_id_bin() | non_neg_integer()}, proplist()) -> hashtree();
-         ({index(), tree_id_bin() | non_neg_integer()}, hashtree()) -> hashtree().
+            ({index(), tree_id_bin() | non_neg_integer()}, hashtree()) -> hashtree().
 new(TreeId, Options) when is_list(Options) ->
-    State = new_segment_store(Options, #state{}),
-    new(TreeId, State, Options);
+    {DB, Path} = new_segment_store(Options),
+    new(TreeId, DB, Path, Options);
 new(TreeId, LinkedStore = #state{}) ->
     new(TreeId, LinkedStore, []).
 
 -spec new({index(), tree_id_bin() | non_neg_integer()},
-          hashtree(),
+            hashtree(), proplist()) -> hashtree().
+new(TreeId, LinkedStore, Options) ->
+    new(TreeId, LinkedStore#state.ref, LinkedStore#state.path, Options).
+
+-spec new({index(), tree_id_bin() | non_neg_integer()},
+          term(), string(),
           proplist()) -> hashtree().
-new({Index,TreeId}, LinkedStore, Options) ->
+new({Index,TreeId}, DB, Path, Options) ->
     NumSegments = proplists:get_value(segments, Options, ?NUM_SEGMENTS),
     Width = proplists:get_value(width, Options, ?WIDTH),
     MemLevels = proplists:get_value(mem_levels, Options, ?MEM_LEVELS),
@@ -274,8 +279,8 @@ new({Index,TreeId}, LinkedStore, Options) ->
                    write_buffer_count=0,
                    tree=dict:new(),
                    itr_filter_fun=ItrFilterFun},
-    State2 = share_segment_store(State, LinkedStore),
-    State2.
+                   ref = DB,
+                   path = Path}.
 
 -spec close(hashtree()) -> hashtree().
 close(State) ->
@@ -336,6 +341,7 @@ maybe_flush_buffer(State=#state{write_buffer_count=WCount}) ->
             State
     end.
 
+-spec flush_buffer(hashtree()) -> hashtree().
 flush_buffer(State=#state{write_buffer=[], write_buffer_count=0}) ->
     State;
 flush_buffer(State=#state{write_buffer=WBuffer}) ->
@@ -425,14 +431,13 @@ clear_buckets(State=#state{id=Id, ref=Ref}) ->
                   end
           end,
     Opts = [{first_key, encode_bucket(Id, 0, 0)}],
-    Removed = try
-%hashtree.erl:415: The call eleveldb:fold(Ref::any(),Fun::fun((_,_) -> number()),0,Opts::[{'first_key',<<_:320>>},...]) breaks the contract (db_ref(),fold_fun(),any(),read_options()) -> any()
-
-                  eleveldb:fold(Ref, Fun, 0, Opts)
-              catch
-                  {break, AccFinal} ->
-                      AccFinal
-              end,
+    Removed = 
+        try
+            eleveldb:fold(Ref, Fun, 0, Opts)
+        catch
+            {break, AccFinal} ->
+                AccFinal
+        end,
     lager:debug("Tree ~p cleared ~p segments.\n", [Id, Removed]),
 
     %% Mark the tree as requiring a full rebuild (will be fixed
@@ -440,7 +445,7 @@ clear_buckets(State=#state{id=Id, ref=Ref}) ->
     %% tree.
     State#state{next_rebuild = full,
                 tree = dict:new()}.
-            
+
 
 -spec update_tree([integer()], hashtree()) -> hashtree().
 update_tree([], State) ->
@@ -696,12 +701,12 @@ del_bucket(Level, Bucket, State) ->
             del_disk_bucket(Level, Bucket, State)
     end.
 
--spec new_segment_store(proplist(), hashtree()) -> hashtree().
-new_segment_store(Opts, State) ->
+-spec new_segment_store(proplist()) -> {term(), string()}.
+new_segment_store(Opts) ->
     DataDir = case proplists:get_value(segment_path, Opts) of
                   undefined ->
                       Root = "/tmp/anti/level",
-                      <<P:128/integer>> = md5(term_to_binary({erlang:now(), make_ref()})),
+                      <<P:128/integer>> = md5(term_to_binary({os:timestamp(), make_ref()})),
                       filename:join(Root, integer_to_list(P));
                   SegmentPath ->
                       SegmentPath
@@ -718,7 +723,7 @@ new_segment_store(Opts, State) ->
     %% flushed to disk at once when under a heavy uniform load.
     WriteBufferMin = proplists:get_value(write_buffer_size_min, Config, DefaultWriteBufferMin),
     WriteBufferMax = proplists:get_value(write_buffer_size_max, Config, DefaultWriteBufferMax),
-    {Offset, _} = random:uniform_s(1 + WriteBufferMax - WriteBufferMin, now()),
+    Offset = rand:uniform(1 + WriteBufferMax - WriteBufferMin),
     WriteBufferSize = WriteBufferMin + Offset,
     Config2 = orddict:store(write_buffer_size, WriteBufferSize, Config),
     Config3 = orddict:erase(write_buffer_size_min, Config2),
@@ -729,11 +734,7 @@ new_segment_store(Opts, State) ->
 
     ok = filelib:ensure_dir(DataDir),
     {ok, Ref} = eleveldb:open(DataDir, Options),
-    State#state{ref=Ref, path=DataDir}.
-
--spec share_segment_store(hashtree(), hashtree()) -> hashtree().
-share_segment_store(State, #state{ref=Ref, path=Path}) ->
-    State#state{ref=Ref, path=Path}.
+    {Ref, DataDir}.
 
 -spec hash(term()) -> empty | binary().
 hash([]) ->
@@ -1596,14 +1597,6 @@ opened_closed_test() ->
 %%%===================================================================
 
 -ifdef(EQC).
-sha_test_() ->
-    {spawn,
-     {timeout, 120,
-      fun() ->
-              ?assert(eqc:quickcheck(eqc:testing_time(4, prop_sha())))
-      end
-     }}.
-
 prop_sha() ->
     %% NOTE: Generating 1MB (1024 * 1024) size binaries is incredibly slow
     %% with EQC and was using over 2GB of memory
@@ -1617,14 +1610,6 @@ prop_sha() ->
                                 ChunkSize = max(1, (Size div NumChunks)),
                                 sha(ChunkSize, Bin) =:= esha(Bin)
                             end)).
-
-eqc_test_() ->
-    {spawn,
-     {timeout, 120,
-      fun() ->
-              ?assert(eqc:quickcheck(eqc:testing_time(4, prop_correct())))
-      end
-     }}.
 
 objects() ->
     ?SIZED(Size, objects(Size+3)).
@@ -1707,7 +1692,7 @@ prop_correct() ->
                         true
                     end)).
 
-est_prop() ->
+prop_est() ->
     %% It's hard to estimate under 10000 keys
     ?FORALL(N, choose(10000, 500000),
             begin
@@ -1718,13 +1703,4 @@ est_prop() ->
                 ?assertEqual(true, MaxDiff > Diff),
                 true
             end).
-
-est_test_() ->
-    {spawn,
-     {timeout, 240,
-      fun() ->
-              ?assert(eqc:quickcheck(eqc:testing_time(10, est_prop())))
-      end
-     }}.
-
 -endif.

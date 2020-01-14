@@ -17,7 +17,7 @@
 %%
 %% -------------------------------------------------------------------
 -module('riak_core_vnode').
--behaviour(gen_fsm).
+-behaviour(gen_fsm_compat).
 -include("riak_core_vnode.hrl").
 -export([start_link/3,
          start_link/4,
@@ -44,6 +44,9 @@
          trigger_delete/1,
          core_status/1,
          handoff_error/3]).
+-export([queue_work/4]).
+
+-include("stacktrace.hrl").
 
 -ifdef(TEST).
 
@@ -56,7 +59,7 @@
 -ifdef(PULSE).
 -compile(export_all).
 -compile({parse_transform, pulse_instrument}).
--compile({pulse_replace_module, [{gen_fsm, pulse_gen_fsm},
+-compile({pulse_replace_module, [{gen_fsm_compat, pulse_gen_fsm},
                                  {gen_server, pulse_gen_server}]}).
 -endif.
 
@@ -131,7 +134,7 @@
 %% message and the function signature is: handle_exit(Pid, Reason, State).
 %%
 %% It should return a tuple indicating the next state for the fsm. For a list of
-%% valid return types see the documentation for the gen_fsm handle_info callback.
+%% valid return types see the documentation for the gen_fsm_compat handle_info callback.
 %%
 %% Here is what the spec for handle_exit/3 would look like:
 %% -spec handle_exit(pid(), atom(), term()) ->
@@ -155,11 +158,11 @@
           modstate :: term(),
           forward :: node() | [{integer(), node()}],
           handoff_target=none :: none | {integer(), node()},
-          handoff_pid :: pid(),
-          handoff_type :: riak_core_handoff_manager:ho_type(),
+          handoff_pid :: pid() | undefined,
+          handoff_type :: riak_core_handoff_manager:ho_type() | undefined,
           pool_pid :: pid() | undefined,
           pool_config :: tuple() | undefined,
-          manager_event_timer :: reference(),
+          manager_event_timer :: reference() | undefined,
           inactivity_timeout :: non_neg_integer()
          }).
 
@@ -167,20 +170,20 @@ start_link(Mod, Index, Forward) ->
     start_link(Mod, Index, 0, Forward).
 
 start_link(Mod, Index, InitialInactivityTimeout, Forward) ->
-    gen_fsm:start_link(?MODULE,
+    gen_fsm_compat:start_link(?MODULE,
                        [Mod, Index, InitialInactivityTimeout, Forward], []).
 
 %% Send a command message for the vnode module by Pid -
 %% typically to do some deferred processing after returning yourself
 send_command(Pid, Request) ->
-    gen_fsm:send_event(Pid, ?VNODE_REQ{request=Request}).
+    gen_fsm_compat:send_event(Pid, ?VNODE_REQ{request=Request}).
 
 
 %% Sends a command to the FSM that called it after Time
 %% has passed.
 -spec send_command_after(integer(), term()) -> reference().
 send_command_after(Time, Request) ->
-    gen_fsm:send_event_after(Time, ?VNODE_REQ{request=Request}).
+    gen_fsm_compat:send_event_after(Time, ?VNODE_REQ{request=Request}).
 
 
 init([Mod, Index, InitialInactivityTimeout, Forward]) ->
@@ -229,22 +232,36 @@ do_init(State = #state{index=Index, mod=Mod, forward=Forward}) ->
         {error, Reason} ->
             {error, Reason};
         _ ->
-            case lists:keyfind(pool, 1, Props) of
-                {pool, WorkerModule, PoolSize, WorkerArgs}=PoolConfig ->
-                    lager:debug("starting worker pool ~p with size of ~p~n",
-                                [WorkerModule, PoolSize]),
-                    {ok, PoolPid} = riak_core_vnode_worker_pool:start_link(WorkerModule,
-                                                                       PoolSize,
-                                                                       Index,
-                                                                       WorkerArgs,
-                                                                       worker_props);
-                _ ->
-                    PoolPid = PoolConfig = undefined
-            end,
+            ModState0 = 
+                case lists:keyfind(pool, 1, Props) of
+                    {pool, WorkerMod, PoolSize, WorkerArgs}=PoolConfig ->
+                        lager:info("Starting vnode worker pool " ++ 
+                                        "~p with size of ~p~n",
+                                    [WorkerMod, PoolSize]),
+                        {ok, PoolPid} =
+                            riak_core_vnode_worker_pool:start_link(WorkerMod,
+                                                                PoolSize,
+                                                                Index,
+                                                                WorkerArgs,
+                                                                worker_props),
+                        % If the vnode Module requires access to the vnode worker 
+                        % pool, it should export a function add_vnode_pool/2
+                        case erlang:function_exported(Mod, add_vnode_pool, 2) of
+                            true ->
+                                lager:info("Adding vnode_pool ~w to ~w state",
+                                            [PoolPid, Mod]),
+                                Mod:add_vnode_pool(PoolPid, ModState);
+                            false ->
+                                ModState
+                        end;
+                    _ ->
+                        PoolPid = PoolConfig = undefined,
+                        ModState
+                end,
             riak_core_handoff_manager:remove_exclusion(Mod, Index),
             Timeout = app_helper:get_env(riak_core, vnode_inactivity_timeout, ?DEFAULT_TIMEOUT),
-            Timeout2 = Timeout + random:uniform(Timeout),
-            State2 = State#state{modstate=ModState, inactivity_timeout=Timeout2,
+            Timeout2 = Timeout + rand:uniform(Timeout),
+            State2 = State#state{modstate=ModState0, inactivity_timeout=Timeout2,
                                  pool_pid=PoolPid, pool_config=PoolConfig},
             lager:debug("vnode :: ~p/~p :: ~p~n", [Mod, Index, Forward]),
             State3 = mod_set_forwarding(Forward, State2),
@@ -252,28 +269,28 @@ do_init(State = #state{index=Index, mod=Mod, forward=Forward}) ->
     end.
 
 wait_for_init(Vnode) ->
-    gen_fsm:sync_send_event(Vnode, wait_for_init, infinity).
+    gen_fsm_compat:sync_send_event(Vnode, wait_for_init, infinity).
 
 handoff_error(Vnode, Err, Reason) ->
-    gen_fsm:send_event(Vnode, {handoff_error, Err, Reason}).
+    gen_fsm_compat:send_event(Vnode, {handoff_error, Err, Reason}).
 
 get_mod_index(VNode) ->
-    gen_fsm:sync_send_all_state_event(VNode, get_mod_index).
+    gen_fsm_compat:sync_send_all_state_event(VNode, get_mod_index).
 
 set_forwarding(VNode, ForwardTo) ->
-    gen_fsm:send_all_state_event(VNode, {set_forwarding, ForwardTo}).
+    gen_fsm_compat:send_all_state_event(VNode, {set_forwarding, ForwardTo}).
 
 trigger_handoff(VNode, TargetIdx, TargetNode) ->
-    gen_fsm:send_all_state_event(VNode, {trigger_handoff, TargetIdx, TargetNode}).
+    gen_fsm_compat:send_all_state_event(VNode, {trigger_handoff, TargetIdx, TargetNode}).
 
 trigger_handoff(VNode, TargetNode) ->
-    gen_fsm:send_all_state_event(VNode, {trigger_handoff, TargetNode}).
+    gen_fsm_compat:send_all_state_event(VNode, {trigger_handoff, TargetNode}).
 
 trigger_delete(VNode) ->
-    gen_fsm:send_all_state_event(VNode, trigger_delete).
+    gen_fsm_compat:send_all_state_event(VNode, trigger_delete).
 
 core_status(VNode) ->
-    gen_fsm:sync_send_all_state_event(VNode, core_status).
+    gen_fsm_compat:sync_send_all_state_event(VNode, core_status).
 
 continue(State) ->
     {next_state, active, State, State#state.inactivity_timeout}.
@@ -360,6 +377,15 @@ vnode_command(Sender, Request, State=#state{mod=Mod,
             %% the result is sent back to 'From'
             riak_core_vnode_worker_pool:handle_work(Pool, Work, From),
             continue(State, NewModState);
+        {PoolName, Work, From, NewModState} ->
+            %% dispatch some work to the node worker pool
+            %% the result is sent back to 'From'
+            %% The node worker pool stops too many vnodes from running
+            %% the fold concurrently
+            %% If a node_worker_pool has not been setup under the given name
+            %% then it will fallback to the vnode worker pool
+            queue_work(PoolName, Work, From, Pool),
+            continue(State, NewModState);
         {stop, Reason, NewModState} ->
             {stop, Reason, State#state{modstate=NewModState}}
     end.
@@ -395,6 +421,15 @@ vnode_coverage(Sender, Request, KeySpaces, State=#state{index=Index,
             %% dispatch some work to the vnode worker pool
             %% the result is sent back to 'From'
             riak_core_vnode_worker_pool:handle_work(Pool, Work, From),
+            continue(State, NewModState);
+        {PoolName, Work, From, NewModState} ->
+            %% dispatch some work to the node worker pool
+            %% the result is sent back to 'From'
+            %% The node worker pool stops too many vnodes from running
+            %% the fold concurrently
+            %% If a node_worker_pool has not been setup under the given name
+            %% then it will fallback to the vnode worker pool
+            queue_work(PoolName, Work, From, Pool),
             continue(State, NewModState);
         {stop, Reason, NewModState} ->
             {stop, Reason, State#state{modstate=NewModState}}
@@ -896,9 +931,9 @@ terminate(Reason, _StateName, #state{mod=Mod, modstate=ModState,
             _ ->
                 ok
         end
-    catch C:T ->
+    catch ?_exception_(C, T, StackToken) ->
         lager:error("Error while shutting down vnode worker pool ~p:~p trace : ~p",
-                    [C, T, erlang:get_stacktrace()])
+                    [C, T, ?_get_stacktrace_(StackToken)])
     after
         case ModState of
             %% Handoff completed, Mod:delete has been called, now terminate.
@@ -1026,13 +1061,13 @@ monitor(ignore) ->
 start_manager_event_timer(Event, State=#state{mod=Mod, index=Idx}) ->
     riak_core_vnode_manager:vnode_event(Mod, Idx, self(), Event),
     stop_manager_event_timer(State),
-    T2 = gen_fsm:send_event_after(30000, {send_manager_event, Event}),
+    T2 = gen_fsm_compat:send_event_after(30000, {send_manager_event, Event}),
     State#state{manager_event_timer=T2}.
 
 stop_manager_event_timer(#state{manager_event_timer=undefined}) ->
     ok;
 stop_manager_event_timer(#state{manager_event_timer=T}) ->
-    _ = gen_fsm:cancel_timer(T),
+    _ = gen_fsm_compat:cancel_timer(T),
     ok.
 
 is_request_forwardable(#riak_core_fold_req_v2{forwardable=false}) ->
@@ -1056,6 +1091,22 @@ mod_set_forwarding(Forward, State=#state{mod=Mod, modstate=ModState}) ->
             State
     end.
 
+queue_work(PoolName, Work, From, VnodeWrkPool) ->
+    PoolName0 =
+        case PoolName of
+            queue -> riak_core_node_worker_pool:nwp();
+            PoolName -> PoolName
+        end,
+    case whereis(PoolName0) of
+        undefined ->
+            lager:info("Using vnode pool as ~w pool is not registered",
+                        [PoolName0]),
+            riak_core_stat:update({worker_pool, unregistered}),
+            riak_core_vnode_worker_pool:handle_work(VnodeWrkPool, Work, From);
+        _P ->
+            riak_core_node_worker_pool:handle_work(PoolName0, Work, From)
+    end.
+
 %% ===================================================================
 %% Test API
 %% ===================================================================
@@ -1063,43 +1114,48 @@ mod_set_forwarding(Forward, State=#state{mod=Mod, modstate=ModState}) ->
 %% @doc Reveal the underlying module state for testing
 -spec(get_modstate(pid()) -> {atom(), #state{}}).
 get_modstate(Pid) ->
-    {_StateName, State} = gen_fsm:sync_send_all_state_event(Pid, current_state),
+    {_StateName, State} = gen_fsm_compat:sync_send_all_state_event(Pid, current_state),
     {State#state.mod, State#state.modstate}.
 
 -ifdef(TEST).
 
 %% Start the garbage collection server
 test_link(Mod, Index) ->
-    gen_fsm:start_link(?MODULE, [Mod, Index, 0, node()], []).
+    gen_fsm_compat:start_link(?MODULE, [Mod, Index, 0, node()], []).
 
 %% Get the current state of the fsm for testing inspection
 -spec current_state(pid()) -> {atom(), #state{}} | {error, term()}.
 current_state(Pid) ->
-    gen_fsm:sync_send_all_state_event(Pid, current_state).
+    gen_fsm_compat:sync_send_all_state_event(Pid, current_state).
 
-pool_death_test() ->
-    meck:new(test_vnode, [non_strict, no_link]),
-    meck:expect(test_vnode, init, fun(_) -> {ok, [], [{pool, test_pool_mod, 1, []}]} end),
-    meck:expect(test_vnode, terminate, fun(_, _) -> normal end),
-    meck:new(test_pool_mod, [non_strict, no_link]),
-    meck:expect(test_pool_mod, init_worker, fun(_, _, _) -> {ok, []} end),
+pool_death_test_() ->
+    {timeout, 60, [
+                   fun() ->
+                           meck:new(test_vnode, [non_strict, no_link]),
+                           meck:expect(test_vnode, init, fun(_) -> {ok, [], [{pool, test_pool_mod, 1, []}]} end),
+                           meck:expect(test_vnode, terminate, fun(_, _) -> normal end),
+                           meck:new(test_pool_mod, [non_strict, no_link]),
+                           meck:expect(test_pool_mod, init_worker, fun(_, _, _) -> {ok, []} end),
 
-    {ok, Pid} = ?MODULE:test_link(test_vnode, 0),
-    {_, StateData1} = ?MODULE:current_state(Pid),
-    PoolPid1 = StateData1#state.pool_pid,
-    exit(PoolPid1, kill),
-    wait_for_process_death(PoolPid1),
-    ?assertNot(is_process_alive(PoolPid1)),
-    wait_for_state_update(StateData1, Pid),
-    {_, StateData2} = ?MODULE:current_state(Pid),
-    PoolPid2 = StateData2#state.pool_pid,
-    ?assertNot(PoolPid2 =:= undefined),
-    exit(Pid, normal),
-    wait_for_process_death(Pid),
-    meck:validate(test_pool_mod),
-    meck:validate(test_vnode),
-    meck:unload(test_pool_mod),
-    meck:unload(test_vnode).
+                           {ok, Pid} = ?MODULE:test_link(test_vnode, 0),
+                           unlink(Pid),
+                           {_, StateData1} = ?MODULE:current_state(Pid),
+                           PoolPid1 = StateData1#state.pool_pid,
+                           exit(PoolPid1, kill),
+                           wait_for_process_death(PoolPid1),
+                           ?assertNot(is_process_alive(PoolPid1)),
+                           wait_for_state_update(StateData1, Pid),
+                           {_, StateData2} = ?MODULE:current_state(Pid),
+                           PoolPid2 = StateData2#state.pool_pid,
+                           ?assertNot(PoolPid2 =:= undefined),
+                           exit(Pid, normal),
+                           wait_for_process_death(Pid),
+                           meck:validate(test_pool_mod),
+                           meck:validate(test_vnode),
+                           meck:unload(test_pool_mod),
+                           meck:unload(test_vnode)
+                   end
+                  ]}.
 
 wait_for_process_death(Pid) ->
     wait_for_process_death(Pid, is_process_alive(Pid)).

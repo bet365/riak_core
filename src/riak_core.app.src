@@ -6,7 +6,7 @@
   {vsn, git},
   {modules, []},
   {registered, []},
-  {included_applications, [folsom, riak_ensemble]},
+  {included_applications, [riak_ensemble]},
   {applications, [
                   kernel,
                   stdlib,
@@ -20,7 +20,9 @@
                   pbkdf2,
                   poolboy,
                   exometer_core,
-                  clique
+                  clique,
+                  cluster_info,
+                  gen_fsm_compat
                  ]},
   {mod, {riak_core_app, []}},
   {env, [
