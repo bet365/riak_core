@@ -38,6 +38,7 @@
          iterator_done/1,
          iterator_close/1,
          put/3,
+         put/4,
          merge/3]).
 
 %% riak_core_broadcast_handler callbacks
@@ -230,16 +231,22 @@ iterator_close(It) -> finish_iterator(It).
 
 %% @doc Sets the value of a prefixed key. The most recently read context (see get/1)
 %% should be passed as the second argument to prevent unneccessary siblings.
--spec put(metadata_pkey(),
-          metadata_context() | undefined,
-          metadata_value() | metadata_modifier()) -> metadata_object().
+%%-spec put(metadata_pkey(),
+%%          metadata_context() | undefined,
+%%          metadata_value() | metadata_modifier()) -> metadata_object().
 put(PKey, undefined, ValueOrFun) ->
     %% nil is an empty version vector for dvvset
     put(PKey, [], ValueOrFun);
 put({{Prefix, SubPrefix}, _Key}=PKey, Context, ValueOrFun)
   when (is_binary(Prefix) orelse is_atom(Prefix)) andalso
        (is_binary(SubPrefix) orelse is_atom(SubPrefix)) ->
-    gen_server:call(?SERVER, {put, PKey, Context, ValueOrFun}, infinity).
+    put(PKey, Context, ValueOrFun, []).
+put(PKey, undefined, ValueOrFun, Opts) ->
+    put(PKey, [], ValueOrFun, Opts);
+put({{Prefix, SubPrefix}, _Key}=PKey, Context, ValueOrFun, Opts)
+    when (is_binary(Prefix) orelse is_atom(Prefix)) andalso
+    (is_binary(SubPrefix) orelse is_atom(SubPrefix)) ->
+    gen_server:call(?SERVER, {put, PKey, Context, ValueOrFun, Opts}, infinity).
 
 %% @doc same as merge/2 but merges the object on `Node'
 -spec merge(node(), {metadata_pkey(), undefined | metadata_context()}, metadata_object()) -> boolean().
@@ -349,8 +356,8 @@ init([Opts]) ->
                          {noreply, #state{}, non_neg_integer()} |
                          {stop, term(), term(), #state{}} |
                          {stop, term(), #state{}}.
-handle_call({put, PKey, Context, ValueOrFun}, _From, State) ->
-    {Result, NewState} = read_modify_write(PKey, Context, ValueOrFun, State),
+handle_call({put, PKey, Context, ValueOrFun, Opts}, _From, State) ->
+    {Result, NewState} = read_modify_write(PKey, Context, ValueOrFun, Opts, State),
     {reply, Result, NewState};
 handle_call({merge, PKey, Obj}, _From, State) ->
     {Result, NewState} = read_merge_write(PKey, Obj, State),
@@ -542,10 +549,12 @@ iterator_match(undefined) ->
 iterator_match(KeyMatch) ->
     {KeyMatch, '_'}.
 
-read_modify_write(PKey, Context, ValueOrFun, State=#state{serverid=ServerId}) ->
+read_modify_write(PKey, Context, ValueOrFun, Opts, State=#state{serverid=ServerId}) ->
     Existing = read(PKey),
+    lager:info("ValueorFun: ~p~n", [ValueOrFun]),
     Modified = riak_core_metadata_object:modify(Existing, Context, ValueOrFun, ServerId),
-    store(PKey, Modified, State).
+    lager:info("Modified: ~p~n", [Modified]),
+    store(PKey, Modified, Opts, State).
 
 read_merge_write(PKey, Obj, State) ->
     Existing = read(PKey),
@@ -556,7 +565,9 @@ read_merge_write(PKey, Obj, State) ->
             {true, NewState}
     end.
 
-store({FullPrefix, Key}=PKey, Metadata, State) ->
+store({_FullPrefix, _Key}=PKey, Metadata, State) ->
+    store(PKey, Metadata, [], State).
+store({FullPrefix, Key}=PKey, Metadata, _Opts, State) ->
     _ = maybe_init_ets(FullPrefix),
     maybe_init_dets(FullPrefix, State#state.data_root),
 
@@ -565,6 +576,7 @@ store({FullPrefix, Key}=PKey, Metadata, State) ->
     ets:insert(ets_tab(FullPrefix), Objs),
     riak_core_metadata_hashtree:insert(PKey, Hash),
     ok = dets_insert(dets_tabname(FullPrefix), Objs),
+%%    propogate_events({PKey, Metadata}),
     {Metadata, State}.
 
 read({FullPrefix, Key}) ->
@@ -683,3 +695,11 @@ default_data_root() ->
         {ok, PRoot} -> filename:join(PRoot, "cluster_meta");
         undefined -> undefined
     end.
+
+%%propogate_events({{{split_backend, BackendType}, Key}, Metadata} = _FullKey) ->
+%%    lager:info("MD about to be propegated: ~p~n", [Metadata]),
+%%    lager:info("propogating event to put type and bucket: ~p~n", [{BackendType, Key}]),
+%%    lager:info("Metadata value to be propogated: ~p~n", [riak_core_metadata_object:value(Metadata)]),
+%%    riak_core_metadata_events:metadata_update(Key, Metadata);
+%%propogate_events(_) ->
+%%    ok.
