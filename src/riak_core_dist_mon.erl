@@ -55,11 +55,6 @@ init(_) ->
      || {_Node, Port} <- DistCtrl],
     {ok, #state{sndbuf=SndBuf, recbuf=RecBuf}}.
 
-get_riak_env_vars() ->
-    {ok, SndBuf} = application:get_env(riak_core, dist_send_buf_size),
-    {ok, RecBuf} = application:get_env(riak_core, dist_recv_buf_size),
-    {SndBuf, RecBuf}.
-
 handle_call({set_dist_buf_sizes, SndBuf, RecBuf}, _From, State) ->
     _ = [set_port_buffers(Port, SndBuf, RecBuf)
      || {_Node, Port} <- erlang:system_info(dist_ctrl)],
@@ -100,5 +95,29 @@ code_change(_OldVsn, State, _Extra) ->
 %% private 
 
 set_port_buffers(Port, SndBuf, RecBuf) ->
-    inet:setopts(Port, [{sndbuf, SndBuf},
-                        {recbuf, RecBuf}]).
+  set_recv_buffer(Port, RecBuf),
+  set_send_buffer(Port, SndBuf),
+  ok.
+
+set_recv_buffer(_Port, undefined) ->
+  ok;
+set_recv_buffer(Port, RecBuf) ->
+  inet:setopts(Port, [{recbuf, RecBuf}]).
+
+set_send_buffer(_Port, undefined) ->
+  ok;
+set_send_buffer(Port, SndBuf) ->
+  inet:setopts(Port, [{sndbuf, SndBuf}]).
+
+get_riak_env_vars() ->
+  SndBuf = get_var(dist_send_buf_size),
+  RecBuf = get_var(dist_recv_buf_size),
+  {SndBuf, RecBuf}.
+
+get_var(Name) ->
+  case application:get_env(riak_core, Name) of
+    {ok, Value} ->
+      Value;
+    undefined ->
+      undefined
+  end.

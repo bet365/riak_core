@@ -64,8 +64,10 @@
          %% 10GE environment, and may need tuning for your
          %% network and workload. In particular they're likely
          %% too small to be optimal for larger object sizes.
-         {dist_send_buf_size, 393216},
-         {dist_recv_buf_size, 786432},
+
+         %% Opted to remove these and allow the OS to automatically tune the buffers
+%%         {dist_send_buf_size, 393216},
+%%         {dist_recv_buf_size, 786432},
 
 	 %% Exometer defaults
 	 {exometer_defaults,
