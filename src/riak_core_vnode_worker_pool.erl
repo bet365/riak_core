@@ -185,14 +185,14 @@ handle_info({'DOWN', _Ref, _, Pid, Info}, shutdown, #state{monitors=Monitors} = 
     case lists:keytake(Pid, 1, Monitors) of
         {value, {Pid, _, From, Work}, []} ->
             riak_core_vnode:reply(From, {error, {worker_crash, Info, Work}}),
+            gen_server:reply(State#state.shutdown, ok),
             {stop, shutdown, State#state{monitors = []}};
         {value, {Pid, _, From, Work}, Monitors1} ->
             riak_core_vnode:reply(From, {error, {worker_crash, Info, Work}}),
-            NewMonitors = lists:keydelete(Pid, 1, Monitors1),
             %% trigger to do more work will be 'worker_start' message
             %% when poolboy replaces this worker (if not a 'checkin'
             %% or 'handle_work')
-            {next_state, shutdown, State#state{monitors = NewMonitors}};
+            {next_state, shutdown, State#state{monitors = Monitors1}};
         false ->
             {next_state, shutdown, State}
     end;
