@@ -200,6 +200,22 @@ handle_sync_event({shutdown, Time}, From, _StateName, #state{queue=Q,
 handle_sync_event(_Event, _From, StateName, State) ->
     {reply, {error, unknown_message}, StateName, State}.
 
+handle_info({'DOWN', _Ref, _, Pid, Info}, shutdown, #state{monitors=Monitors} = State) ->
+    %% remove the listing for the dead worker
+    case lists:keytake(Pid, 1, Monitors) of
+        {value, {Pid, _, From, Work}, []} ->
+            riak_core_vnode:reply(From, {error, {worker_crash, Info, Work}}),
+            gen_server:reply(State#state.shutdown, ok),
+            {stop, shutdown, State#state{monitors = []}};
+        {value, {Pid, _, From, Work}, Monitors1} ->
+            riak_core_vnode:reply(From, {error, {worker_crash, Info, Work}}),
+            %% trigger to do more work will be 'worker_start' message
+            %% when poolboy replaces this worker (if not a 'checkin'
+            %% or 'handle_work')
+            {next_state, shutdown, State#state{monitors = Monitors1}};
+        false ->
+            {next_state, shutdown, State}
+    end;
 handle_info({'DOWN', _Ref, _, Pid, Info}, StateName, #state{monitors=Monitors} = State) ->
     %% remove the listing for the dead worker
     case lists:keyfind(Pid, 1, Monitors) of
