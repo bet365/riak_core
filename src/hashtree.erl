@@ -278,7 +278,7 @@ new({Index,TreeId}, DB, Path, Options) ->
             write_buffer=[],
             write_buffer_count=0,
             tree=dict:new(),
-            itr_filter_fun=ItrFilterFun},
+            itr_filter_fun=ItrFilterFun,
             ref = DB,
             path = Path}.
 
