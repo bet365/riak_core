@@ -42,7 +42,8 @@
          activate_bucket_type/1,
          get_bucket_type/2,
          get_bucket_type/3,
-         bucket_type_iterator/0]).
+         bucket_type_iterator/0,
+         set_node_location/2]).
 -export([reassign_indices/1]). % helpers for claim sim
 
 %% gen_server callbacks
@@ -52,7 +53,8 @@
 -type action() :: leave
                 | remove
                 | {replace, node()}
-                | {force_replace, node()}.
+                | {force_replace, node()}
+                | {set_location, binary()}.
 
 -type riak_core_ring() :: riak_core_ring:riak_core_ring().
 
@@ -155,6 +157,12 @@ force_replace(Node, NewNode) ->
 resize_ring(NewRingSize) ->
     %% use the node making the request. it will be ignored
     stage(node(), {resize, NewRingSize}).
+
+
+%% @doc Stage a request to set a new location for the given node.
+-spec set_node_location(node(), binary()) -> ok | {error, atom()}.
+set_node_location(Node, Location) ->
+    stage(Node, {set_location, Location}).
 
 -spec abort_resize() -> ok | {error, atom()}.
 abort_resize() ->
@@ -446,8 +454,9 @@ maybe_commit_staged(Ring, NextRing, #state{next_ring=PlannedRing}) ->
         {_, _, false} ->
             {ignore, plan_changed};
         _ ->
-            NewRing = riak_core_ring:increment_vclock(Claimant, NextRing),
-            {new_ring, NewRing}
+            NewRing0 = riak_core_location:clear_staged_locations(NextRing),
+            NewRing1 = riak_core_ring:increment_vclock(Claimant, NewRing0),
+            {new_ring, NewRing1}
     end.
 
 %% @private
@@ -502,7 +511,9 @@ valid_request(Node, Action, Changes, Ring) ->
         {resize, NewRingSize} ->
             valid_resize_request(NewRingSize, Changes, Ring);
         abort_resize ->
-            valid_resize_abort_request(Ring)
+            valid_resize_abort_request(Ring);
+        {set_location, Location} ->
+            valid_set_location_request(Location, Node, Ring)
     end.
 
 %% @private
@@ -606,6 +617,19 @@ valid_resize_request(NewRingSize, [], Ring) ->
         {_, _, _, _, _, true} -> {error, pending_changes}
     end.
 
+%% @private
+%% Validating node member status
+valid_set_location_request(_Location, Node, Ring) ->
+    case riak_core_ring:member_status(Ring, Node) of
+        valid ->
+            true;
+        joining ->
+            true;
+        invalid ->
+            {error, not_member};
+        _ ->
+            true
+    end.
 
 valid_resize_abort_request(Ring) ->
     IsResizing = riak_core_ring:is_resizing(Ring),
@@ -1094,7 +1118,9 @@ change({{force_replace, NewNode}, Node}, Ring) ->
 change({{resize, NewRingSize}, _Node}, Ring) ->
     riak_core_ring:resize(Ring, NewRingSize);
 change({abort_resize, _Node}, Ring) ->
-    riak_core_ring:set_pending_resize_abort(Ring).
+    riak_core_ring:set_pending_resize_abort(Ring);
+change({{set_location, Location}, Node}, Ring) ->
+    riak_core_ring:set_node_location(Node, {staged, Location}, Ring).
 
 internal_ring_changed(Node, CState) ->
     {Changed, CState5} = do_claimant(Node, CState, fun log/2),

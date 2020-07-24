@@ -185,7 +185,10 @@ wants_claim_v2(Ring, Node) ->
     RingSize = riak_core_ring:num_partitions(Ring),
     Avg = RingSize div NodeCount,
     Count = proplists:get_value(Node, Counts, 0),
+    HasStagedLocationChange = riak_core_location:has_staged_location_change(Ring),
     case Count < Avg of
+        false when HasStagedLocationChange ->
+            {yes, 1};
         false ->
             no;
         true ->
@@ -289,7 +292,8 @@ choose_claim_v2(Ring, Node) ->
     Params = default_choose_params(),
     choose_claim_v2(Ring, Node, Params).
 
-choose_claim_v2(Ring, Node, Params0) ->
+choose_claim_v2(OrigRing, Node, Params0) ->
+    Ring = riak_core_location:clear_staged_locations(OrigRing),
     Params = default_choose_params(Params0),
     %% Active::[node()]
     Active = riak_core_ring:claiming_members(Ring),
@@ -709,7 +713,7 @@ backfill_ring(RingSize, Nodes, Remaining, Acc) ->
 
 claim_rebalance_n(Ring0, Node) ->
     Ring = riak_core_ring:upgrade(Ring0),
-    Nodes = lists:usort([Node|riak_core_ring:claiming_members(Ring)]),
+    Nodes = get_active_nodes_with_location(Node, Ring),
     Zipped = diagonal_stripe(Ring, Nodes),
 
     lists:foldl(fun({P, N}, Acc) ->
@@ -1269,6 +1273,46 @@ indices_within_n([This | Indices], TN, Last, Q, Acc) ->
 %% [a,b,c,a,b,c] - distance of a apart distance(0, 3) == 3
 circular_distance(I1, I2, Q) ->
     min((Q + I1 - I2) rem Q, (Q + I2 - I1) rem Q).
+
+%% @private
+%% Get active nodes with location
+-spec get_active_nodes_with_location(node(), riak_core_ring:riak_core_ring()) ->
+  [node()].
+get_active_nodes_with_location(Node, Ring) ->
+    Nodes = lists:usort([Node | riak_core_ring:claiming_members(Ring)]),
+    NodesLocations = riak_core_ring:get_nodes_locations(Ring),
+    LocationsNodes = get_location_nodes(Nodes, NodesLocations),
+    Locations = dict:fetch_keys(LocationsNodes),
+    stripe_nodes_by_location(Locations, LocationsNodes).
+
+-spec get_location_nodes([node()], dict:dict()) -> dict:dict().
+get_location_nodes(Nodes, Locations) ->
+    lists:foldl(fun(Node, Acc) ->
+              NodeLocation = riak_core_location:get_node_location(Node, Locations),
+              dict:append(NodeLocation, Node, Acc)
+                end, dict:new(), Nodes).
+
+%% @private
+%% Order nodes list by having a different location after each other
+-spec stripe_nodes_by_location([unknown | binary() ], dict:dict()) -> list(node()).
+stripe_nodes_by_location(Locations, LocationsNodes) ->
+    stripe_nodes_by_location(Locations, LocationsNodes, []).
+
+stripe_nodes_by_location([], _LocationsNodes, NewNodeList)  ->
+    NewNodeList;
+stripe_nodes_by_location(Locations, LocationsNodes, NewNodeList) ->
+    Nth = (length(NewNodeList) rem length(Locations)) + 1,
+    CurrentLocation = lists:nth(Nth, Locations),
+    case dict:find(CurrentLocation, LocationsNodes) of
+      {ok, []} ->
+        NewLocations = lists:delete(CurrentLocation, Locations),
+        NewLocationsNodes = dict:erase(CurrentLocation, LocationsNodes),
+        stripe_nodes_by_location(NewLocations, NewLocationsNodes, NewNodeList);
+      {ok, [Node | RemNodes]} ->
+        stripe_nodes_by_location(Locations,
+                                 dict:store(CurrentLocation, RemNodes, LocationsNodes),
+                                 [Node | NewNodeList])
+    end.
 
 %% ===================================================================
 %% Unit tests

@@ -649,7 +649,9 @@ print_plan(Changes, Ring, NextRings) ->
                       io:format("resize-ring    ~p to ~p partitions~n",[CurrentSize,NewRingSize]);
                  ({_, abort_resize}) ->
                       CurrentSize = riak_core_ring:num_partitions(Ring),
-                      io:format("resize-ring    abort. current size: ~p~n", [CurrentSize])
+                      io:format("resize-ring    abort. current size: ~p~n", [CurrentSize]);
+                 ({Node, {set_location, Location}}) ->
+                     io:format("set-location  ~p to ~s~n", [Node, Location])
               end, Changes),
     io:format("~79..-s~n", [""]),
     io:format("~n"),

@@ -81,6 +81,8 @@
          set_member/4,
          set_member/5,
          members/2,
+         set_node_location/3,
+         get_nodes_locations/1,
          set_claimant/2,
          increment_vclock/2,
          ring_version/1,
@@ -906,6 +908,19 @@ pending_changes(State) ->
 
 set_pending_changes(State, Transfers) ->
     State?CHSTATE{next=Transfers}.
+
+-spec set_node_location(node(), binary() | {staged, binary()}, chstate()) ->
+  chstate().
+set_node_location(Node, Location, State) ->
+  NodesLocations = get_nodes_locations(State),
+  NewNodesLocations = dict:store(Node, Location, NodesLocations),
+  update_meta('$nodes_locations', NewNodesLocations, State).
+
+-spec get_nodes_locations(chstate()) -> dict:dict().
+get_nodes_locations(?CHSTATE{members=Members} = ChState) ->
+  {ok, Value} = get_meta('$nodes_locations', dict:new(), ChState),
+  Nodes = get_members(Members),
+  dict:filter(fun(Node, _) -> lists:member(Node, Nodes) end, Value).
 
 %% @doc Given a ring, `Resizing', that has been resized (and presumably rebalanced)
 %%      schedule a resize transition for `Orig'.
