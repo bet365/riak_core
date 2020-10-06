@@ -29,8 +29,28 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-    Children = [stat_server(Mod) || {_App, Mod} <- riak_core:stat_mods()],
-    {ok, {{one_for_one, 5, 10}, [?CHILD(riak_core_stat_cache, worker)|Children]}}.
+    RestartStrategy = one_for_one,
+    MaxRestarts = 5,
+    MaxSecondsBetweenRestarts = 10,
+
+    SupFlags = #{strategy  => RestartStrategy,
+                 intensity => MaxRestarts,
+                 period    => MaxSecondsBetweenRestarts},
+
+    PushSup = #{id       => riak_stats_push_sup,
+                start    => {riak_stats_push_sup, start_link, []},
+                restart  => permanent,
+                shutdown => 5000,
+                type     => supervisor,
+                modules  => [riak_stats_push_sup]},
+
+    CacheChild = ?CHILD(riak_core_stat_cache, worker),
+
+    StatChildren = [stat_server(Mod) || {_App, Mod} <- riak_core:stat_mods()],
+
+    Children = [PushSup, CacheChild | StatChildren],
+
+    {ok, {SupFlags, Children}}.
 
 start_server(Mod) ->
     Ref = stat_server(Mod),

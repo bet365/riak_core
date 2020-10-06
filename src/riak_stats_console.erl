@@ -29,7 +29,6 @@
     print/1, print/2]).
 
 %% all the attributes to return in 'stat info <stat>'
--define(INFO, [name, type, module, value, cache, status, timestamp, options]).
 
 %%%=============================================================================
 %%% API
