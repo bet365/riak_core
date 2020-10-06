@@ -8,11 +8,15 @@
 -include("riak_stats.hrl").
 
 %% API
-%% API
--export([register/1, get_stats/1, find_entries/2, find_entries/4, stats/0,
-         get_value/1, get_datapoint/2, get_values/1,
-         update/3, unregister/1, change_status/1, reset/1,
-         alias/1, aliases_prefix_foldl/0, timestamp/0]).
+-export([
+    register/1,             stats/0,
+    unregister/1,           get_value/1,
+    get_stats/1,            get_datapoint/2,
+    find_entries/2,         get_values/1,
+    find_entries/4,         reset/1,
+    update/3,               alias/1,
+    change_status/1,        aliases_prefix_foldl/0,
+    timestamp/0]).
 
 -define(CACHE, riak_stat_cache).
 
@@ -34,15 +38,28 @@
 -spec(register(input_stats()) -> ok).
 register(Stats) ->
     lists:foreach(fun
-          ({Name,Type})                -> register_stat(Name,Type,[],[]);
-          ({Name,Type,Option})         -> register_stat(Name,Type,Option,[]);
-          ({Name,Type,Option,Aliases}) -> register_stat(Name,Type,Option,Aliases)
+         ({Name,Type})                -> register_stat(Name,Type, [], []);
+         ({Name,Type,Option})         -> register_stat(Name,Type,Option, []);
+         ({Name,Type,Option,Aliases}) -> register_stat(Name,Type,Option,Aliases)
                   end, Stats),
     ok.
 
 register_stat(Name, Type, Options, Aliases) ->
-    NewOptions = add_cache(Options),
-    register_stats({Name, Type, NewOptions, Aliases}).
+    NewOpts = add_cache(Options),
+    case riak_stats_metadata:enabled() of
+        false ->
+            re_register(Name, Type, NewOpts, Aliases);
+        true ->
+            MetaOpts = riak_stats_metadata:register({Name, Type, NewOpts, Aliases}),
+            re_register(Name, Type, MetaOpts, Aliases)
+    end.
+
+re_register(StatName, Type, Opts, Aliases) ->
+    exometer:re_register(StatName, Type, Opts),
+    lists:foreach(fun({DataPoint, Alias}) ->
+        exometer_alias:new(Alias, StatName, DataPoint)
+                  end, Aliases),
+    ok.
 
 add_cache(Options) ->
     %% look for cache value in stat, if undefined - add cache option
@@ -53,26 +70,9 @@ add_cache(Options) ->
         _ -> Options %% Otherwise return the Options as is
     end.
 
--spec(register_stats(tuple_stat()) -> ok).
-register_stats({StatName, Type, Opts, Aliases}=StatTuple) ->
-    case riak_stats_metadata:enabled() of
-        false ->
-            re_register(StatName,Type,Opts,Aliases);
-        true ->
-            NewOpts = riak_stats_metadata:register(StatTuple),
-            re_register(StatName,Type,NewOpts,Aliases)
-    end.
-
-re_register(StatName, Type, Opts, Aliases) ->
-    exometer:re_register(StatName, Type, Opts),
-    lists:foreach(fun({DP,Alias}) ->
-        exometer_alias:new(Alias,StatName,DP)
-                  end, Aliases),
-    ok.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% NB : DP = DataPoint
-%%      Alias : Name of a datapoint of a Stat.
+%% NB : Alias - Specific Name of a datapoint of a Stat.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%-----------------------------------------------------------------------------
 %% @doc
