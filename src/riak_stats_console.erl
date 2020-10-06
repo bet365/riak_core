@@ -7,22 +7,28 @@
 
 -export([
     %% Stat API
-    show_stat/1, stat_info/1, stat_enable/1, stat_disable/1, status_change/2,
-    reset_stat/1, stat_metadata/1,
-    sanitise_stat_input/1, sanitise_stat_input/2, sanitise_stat_input/3,
+    show/1,                     metadata/1,
+    info/1,                     update_status/2,
+    enable/1,                   sanitise_stat_input/1,
+    disable/1,                  sanitise_stat_input/2,
+    reset/1,                    sanitise_stat_input/3,
 
     %% Profile API
-    save_profile/1, load_profile/1, load_profile_all/1, delete_profile/1,
-    reset_profile/0, reset_profile_all/0, get_profile/1, get_all_profiles/0,
-    get_all_loaded_profiles/0, get_loaded_profile/0,
+    save_profile/1,             load_profile/1,
+    load_profile_all/1,         delete_profile/1,
+    reset_profile/0,            reset_profile_all/0,
+    get_profile/1,              get_all_profiles/0,
+    get_all_loaded_profiles/0,  get_loaded_profile/0,
 
     %% Push API
-    setup/1, setdown/1, find_push_stats/1, find_push_stats_all/1,
+    start/1,                    find_push_stats/1,
+    stop/1,                     find_push_stats_all/1,
     sanitise_push_input/1,
 
     %% Other API
     print/1, print/2]).
 
+%% all the attributes to return in 'stat info <stat>'
 -define(INFO, [name, type, module, value, cache, status, timestamp, options]).
 
 %%%=============================================================================
@@ -32,63 +38,70 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Stats Functions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%-----------------------------------------------------------------------------
-%% @doc
-%% Show enabled or disabled stats when using :
-%%      "stats show <entry>.**"
-%% enabled stats will show by default
-%% @end
+%% @doc Show stat(s) and their value(s) @end
 %%%-----------------------------------------------------------------------------
--spec(show_stat(console_arg()) -> no_return()).
-show_stat(Arg) ->
-    print(find_entries(sanitise_stat_input(Arg))).
+-spec(show(console_arg()) -> no_return()).
+show(Arg) ->
+    SanitisedStats = sanitise_stat_input(Arg),
+    Found = find_entries(SanitisedStats),
+    print(Found).
 
 %%%-----------------------------------------------------------------------------
 %% @doc Returns all the stats information @end
 %%%-----------------------------------------------------------------------------
--spec(stat_info(console_arg()) -> no_return()).
-stat_info(Arg) ->
-    {Attrs, RestArg} = pick_info_attrs(Arg),
-    {Stat,Type,Status,_DPS} = sanitise_stat_input(RestArg),
-    print(find_entries({Stat,Type,Status,Attrs})).
+-spec(info(console_arg()) -> no_return()).
+info(Arg) ->
+    {Attributes, RestArg} = pick_info_attrs(Arg),
+    {Stat, Type, Status, _DataPoints} = sanitise_stat_input(RestArg),
+    %% replace the Datapoints with the attributes given
+    SanitisedStats = {Stat, Type, Status, Attributes},
+    Found = find_entries(SanitisedStats),
+    print(Found).
 
+%%%-----------------------------------------------------------------------------
+%% @doc get list of attrs to return @end
+%%%-----------------------------------------------------------------------------
 -spec(pick_info_attrs(console_arg()) -> {attributes(), console_arg()}).
-%% @doc get list of attrs to print @end
 pick_info_attrs(Arg) ->
     Fun = get_attr_fun(),
-    case lists:foldr(Fun, {[], []}, split_arg(Arg)) of
+    Acc = {[], []},
+    %% Attributes are defined by "-" in front of them (in cmd line)
+    AttrAndStats = re:split(Arg, "\\-", [{return, list}]),
+    case lists:foldr(Fun, Acc, AttrAndStats) of
         {[], Rest} ->           %% If no arguments given
-            {?INFO, Rest}; %% use all, and return arg
+            {?INFO, Rest};      %% use all, and return arg
         Other ->
             Other
     end.
 
 get_attr_fun() ->
     fun
-        ("name",     {As, Ps}) -> {[name      | As], Ps};
-        ("type",     {As, Ps}) -> {[type      | As], Ps};
-        ("module",   {As, Ps}) -> {[module    | As], Ps};
-        ("value",    {As, Ps}) -> {[value     | As], Ps};
-        ("cache",    {As, Ps}) -> {[cache     | As], Ps};
-        ("status",   {As, Ps}) -> {[status    | As], Ps};
-        ("timestamp",{As, Ps}) -> {[timestamp | As], Ps};
-        ("options",  {As, Ps}) -> {[options   | As], Ps};
-        (P,          {As, Ps}) -> {As, [P | Ps]}
-    end. %%% As -> Attributes , Ps -> Points
-
-split_arg(String) ->
-    re:split(String, "\\-", [{return, list}]).
+        ("name",     {Attrs, StatArg}) -> {[name      | Attrs], StatArg};
+        ("type",     {Attrs, StatArg}) -> {[type      | Attrs], StatArg};
+        ("module",   {Attrs, StatArg}) -> {[module    | Attrs], StatArg};
+        ("value",    {Attrs, StatArg}) -> {[value     | Attrs], StatArg};
+        ("cache",    {Attrs, StatArg}) -> {[cache     | Attrs], StatArg};
+        ("status",   {Attrs, StatArg}) -> {[status    | Attrs], StatArg};
+        ("timestamp",{Attrs, StatArg}) -> {[timestamp | Attrs], StatArg};
+        ("options",  {Attrs, StatArg}) -> {[options   | Attrs], StatArg};
+        (Other,      {Attrs, StatArg}) -> {Attrs,     [Other | StatArg]}
+    end.
 
 %%%-----------------------------------------------------------------------------
 %% @doc enable the stats, if the stat is already enabled does nothing @end
 %%%-----------------------------------------------------------------------------
--spec(stat_enable(console_arg()) -> no_return()).
-stat_enable(Arg) -> print(status_change(Arg, enabled)).
+-spec(enable(console_arg()) -> no_return()).
+enable(Arg) ->
+    EnabledStats = update_status(Arg, enabled),
+    print(EnabledStats).
 
 %%%-----------------------------------------------------------------------------
 %% @doc disable the stats - if already disabled does nothing @end
 %%%-----------------------------------------------------------------------------
--spec(stat_disable(console_arg()) -> no_return()).
-stat_disable(Arg) -> print(status_change(Arg, disabled)).
+-spec(disable(console_arg()) -> no_return()).
+disable(Arg) ->
+    DisabledStats = update_status(Arg, disabled),
+    print(DisabledStats).
 
 %%%-----------------------------------------------------------------------------
 %% @doc
@@ -96,22 +109,23 @@ stat_disable(Arg) -> print(status_change(Arg, disabled)).
 %% enabled stats if the status(es) are to be disabled, and vice versa.
 %% @end
 %%%-----------------------------------------------------------------------------
--spec(status_change(console_arg(), status()) -> no_return()).
-status_change(Arg, ToStatus) ->
-    {Entries,_DataPoint} =
+-spec(update_status(console_arg(), status()) -> no_return()).
+update_status(Arg, ToStatus) ->
+    {Entries, _DataPoints} =
         case ToStatus of
             enabled  -> find_entries(sanitise_stat_input(Arg, '_', disabled));
             disabled -> find_entries(sanitise_stat_input(Arg, '_', enabled))
         end,
-    riak_stats_metadata:change_status([{Stat, ToStatus} || {Stat,_,_} <- Entries]).
+    riak_stats_metadata:change_status([{Stat, ToStatus} || {Stat, _, _} <- Entries]).
 
 %%%-----------------------------------------------------------------------------
 %% @doc resets the stats in metadata and exometer @end
 %%%-----------------------------------------------------------------------------
--spec(reset_stat(console_arg()) -> ok).
-reset_stat(Arg) ->
-    {Found, _DataPoints} = find_entries(sanitise_stat_input(Arg)),
-    lists:foreach(fun({Name,_,_}) -> exometer:reset(Name) end, Found).
+-spec(reset(console_arg()) -> ok).
+reset(Arg) ->
+    SanitisedStats = sanitise_stat_input(Arg),
+    {Found, _DataPoints} = find_entries(SanitisedStats),
+    lists:foreach(fun({Name, _, _}) -> exometer:reset(Name) end, Found).
 
 %%%-----------------------------------------------------------------------------
 %% @doc enabling the metadata allows the stats configuration to be persisted,
@@ -124,12 +138,11 @@ reset_stat(Arg) ->
 %% @end
 %%%-----------------------------------------------------------------------------
 -type metadata_arg() :: list() | enabled | disabled | status.
--spec(stat_metadata(metadata_arg()) -> ok).
-stat_metadata(["enable" ]) -> stat_metadata(enabled);
-stat_metadata(["disable"]) -> stat_metadata(disabled);
-stat_metadata(["status" ]) -> stat_metadata(status);
-stat_metadata(status) -> metadata_status();
-stat_metadata(Arg) when is_atom(Arg) ->
+-spec(metadata(metadata_arg()) -> ok).
+metadata(["enable" ]) -> metadata(enabled);
+metadata(["disable"]) -> metadata(disabled);
+metadata(["status" ]) -> metadata_status();
+metadata(Arg) when is_atom(Arg) ->
     case Arg == riak_stats_metadata:enabled() of
         true  -> metadata_status();
         false -> set_metadata(Arg)
@@ -152,12 +165,12 @@ metadata_env(Status) ->
 %%% Helper API
 %%%=============================================================================
 -define(STATUS, enabled). %% default status
--define(TYPE,   '_').     %% default type
+-define(TYPE,   '_').     %% default type (anything)
 -define(DPs,    default). %% default Datapoints
 %%%-----------------------------------------------------------------------------
 %%% @doc
 %%% Arguments coming in from the console arrive at this function for stats, data
-%%% is transformed into a metrics name and type status/datapoints if they have
+%%% is transformed into a metrics name and type, status/datapoints if they have
 %%% been given.
 %%% @end
 %%%-----------------------------------------------------------------------------
@@ -167,9 +180,9 @@ sanitise_stat_input(Arg) ->
 
 %% separate Status from Type with function of same arity
 sanitise_stat_input(Arg, Status)
-    when   Status == enabled
-    orelse Status == disabled
-    orelse Status == '_' ->
+    when   (Status == enabled)
+    orelse (Status == disabled)
+    orelse (Status == '_') ->
     parse_stat_entry(check_args(Arg), ?TYPE, Status, ?DPs);
 %% If doesn't match the clause above, it must be the Type given.
 sanitise_stat_input(Arg, Type) ->
@@ -192,14 +205,15 @@ check_args([Args]) when is_binary(Args) ->
 check_args(Args) when is_atom(Args) ->
     check_args(atom_to_binary(Args, latin1));
 check_args(Args) when is_list(Args) ->
-    check_args(lists:map(fun
-                             (A) when is_atom(A) ->
-                                 atom_to_binary(A, latin1);
-                             (A) when is_list(A) ->
-                                 list_to_binary(A);
-                             (A) when is_binary(A) ->
-                                 A
-                         end, Args));
+    check_args(
+        lists:map(fun
+                      (A) when is_atom(A) ->
+                          atom_to_binary(A, latin1);
+                      (A) when is_list(A) ->
+                          list_to_binary(A);
+                      (A) when is_binary(A) ->
+                          A
+                  end, Args));
 check_args(Args) when is_binary(Args) ->
     [Args];
 check_args(_) ->
@@ -214,10 +228,9 @@ parse_stat_entry(BinArgs, Type, Status, DPs) ->
     StatName = statname(Bin),
     {StatName, NewStatus, NewType, NewDPs}.
 
-%% legacy code \/
 type_status_and_dps([], Type, Status, DPs) ->
     {Type, Status, DPs};
-type_status_and_dps([<<"type=", T/binary>> | Rest], _T,Status,DPs) ->
+type_status_and_dps([<<"type=", T/binary>> | Rest], _T, Status, DPs) ->
     NewType =
         case T of
             <<"*">> -> '_';
@@ -227,7 +240,7 @@ type_status_and_dps([<<"type=", T/binary>> | Rest], _T,Status,DPs) ->
                 end
         end,
     type_status_and_dps(Rest, NewType, Status, DPs);
-type_status_and_dps([<<"status=", S/binary>> | Rest],Type,_Status,DPs) ->
+type_status_and_dps([<<"status=", S/binary>> | Rest], Type, _Status, DPs) ->
     NewStatus =
         case S of
             <<"*">> -> '_';
@@ -238,20 +251,19 @@ type_status_and_dps([<<"status=", S/binary>> | Rest],Type,_Status,DPs) ->
     type_status_and_dps(Rest, Type, NewStatus, DPs);
 type_status_and_dps([DPsBin | Rest], Type, Status, DPs) ->
     Atoms =
-        %% creates a list of the datapoints given from the command line.
-    lists:foldl(fun(D,Acc) ->
-        try list_to_integer(D) of
-            DP -> [DP|Acc]
-        catch _:_ ->
-            try list_to_atom(D) of
-                DP2 ->
-                    [DP2|Acc]
+        lists:foldl(fun(D,Acc) ->
+            try list_to_integer(D) of
+                DP -> [DP|Acc]
             catch _:_ ->
-                io:fwrite("Illegal datapoint name~n"),
-                Acc
+                try list_to_atom(D) of
+                    DP2 ->
+                        [DP2|Acc]
+                catch _:_ ->
+                    io:fwrite("Illegal datapoint name~n"),
+                    Acc
+                end
             end
-        end
-                end,[], re:split(DPsBin,",",[{return,list}])),
+                    end,[], re:split(DPsBin,",",[{return,list}])),
     NewDPs = merge(lists:flatten(Atoms),DPs),
     type_status_and_dps(Rest, Type, Status, NewDPs).
 
@@ -365,19 +377,15 @@ replace_part(H) ->
 pads() -> [lists:duplicate(N, '_') || N <- lists:seq(1,10)].
 
 %%%-----------------------------------------------------------------------------
-%% @doc
-%% Find_entries for the stat show/show-0/info, each one will use find_entries to
-%% print a stats information. specific for show-0 and different for info, stat
-%% show is the generic base in which it was created
-%% @end
+%% @doc Find_entries for the stat show/info. @end
 %%%-----------------------------------------------------------------------------
 -spec(find_entries(sanitised_stat()|console_arg()) -> found_entries()).
-find_entries({Stat,Status,Type,DPs}) ->
-    find_entries(Stat,Status,Type,DPs).
-find_entries(Stats,Status,Type,default) ->
-    find_entries(Stats,Status,Type,[]);
-find_entries(Stats,Status,Type,DPs) ->
-    riak_stats:find_entries(Stats,Status,Type,DPs).
+find_entries({Stat, Status, Type, DPs}) ->
+    find_entries(Stat, Status, Type, DPs).
+find_entries(Stats, Status, Type, default) ->
+    find_entries(Stats, Status, Type, []);
+find_entries(Stats, Status, Type, DPs) ->
+    riak_stats:find_entries(Stats, Status, Type, DPs).
 
 %%%-----------------------------------------------------------------------------
 
@@ -386,48 +394,47 @@ get_value(Name) ->
     Folded = fold_values(Values),
     print_stat_args(Name, Folded).
 
-find_stats_info({Name,Type,Status}, Info) ->
+find_stats_info({Name, Type, Status}, Info) ->
     Values = riak_stats:get_datapoint(Name, Info),
     Folded = fold_values(Values),
-    print_stat_args({Name,Type,Status,Info},Folded).
+    print_stat_args({Name, Type, Status, Info},Folded).
 
-get_info_2(Statname,Attrs) ->
-    fold_values([exometer:info(Statname,Attrs)]).
+get_info_2(Statname, Attrs) ->
+    fold_values([exometer:info(Statname, Attrs)]).
 
 print_stat_args(_StatName, []) -> [];
 print_stat_args(StatName, disabled) ->
     io:fwrite("~p : disabled~n", [StatName]);
-print_stat_args({StatName,Type,Status,Info},{error,_}) ->
-    NewValues = get_info_2(StatName,Info),
-    NewArgs = replace_type_and_status(Type,Status,NewValues),
-    print_stat_args(StatName,NewArgs);
+print_stat_args({StatName, Type, Status, Info},{error,_}) ->
+    NewValues = get_info_2(StatName, Info),
+    NewArgs = replace_type_and_status(Type, Status, NewValues),
+    print_stat_args(StatName, NewArgs);
 print_stat_args({Statname, Type, Status,_Info}, Args) ->
-    NewArgs = replace_type_and_status(Type,Status,Args),
-    print_stat_args(Statname,NewArgs);
+    NewArgs = replace_type_and_status(Type, Status, Args),
+    print_stat_args(Statname, NewArgs);
 print_stat_args(StatName, Args) ->
-    io:fwrite("~p : ~p~n",[StatName,Args]).
+    io:fwrite("~p : ~p~n",[StatName, Args]).
 
 fold_values([]) -> [];
 fold_values(Values) when is_list(Values) ->
     lists:foldl(fun
-                    (undefined,A)           -> A;
-                    ([], A)                 -> A;
-                    ({type,_},A)            -> [{type,undef}|A];
-                    ({status,_},A)          -> [{status,undef}|A];
-                    ({_,undefined},A)       -> A;
-                    ({_,{error,_}},A)       -> A;
-                    ({ms_since_reset,_V},A) -> A;
-                    (DP,A)                  -> [DP|A]
+                    (undefined, A)            -> A;
+                    ([], A)                   -> A;
+                    ({type, _}, A)            -> [{type, undef} | A];
+                    ({status, _}, A)          -> [{status, undef} | A];
+                    ({_, undefined}, A)       -> A;
+                    ({_, {error, _}}, A)      -> A;
+                    ({ms_since_reset, _V}, A) -> A;
+                    (DP, A)                   -> [DP | A]
                 end, [], Values);
-fold_values({ok,Values}) -> fold_values(Values);
+fold_values({ok, Values}) -> fold_values(Values);
 fold_values(Values) -> Values.
 
-replace_type_and_status(Type,Status,List) ->
-    NewList = lists:keyreplace(type,1,List,{type,Type}),
-    lists:keyreplace(status,1,NewList, {status,Status}).
+replace_type_and_status(Type, Status, List) ->
+    NewList = lists:keyreplace(type, 1, List, {type, Type}),
+    lists:keyreplace(status, 1, NewList, {status, Status}).
 
-print_response(String, Args) ->
-    io:fwrite(String, Args).
+print_response(String, Args) -> io:fwrite(String, Args).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%% Profile Functions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -447,12 +454,12 @@ save_profile(ProfileName) ->
 -spec(load_profile(profile_name()) -> ok).
 load_profile(ProfileName) ->
     load_profile(ProfileName, [node()]).
-load_profile(ProfileName,Node) ->
+load_profile(ProfileName, Node) ->
     ConcatStrName = sanitise_profile_input(ProfileName),
     print_profile("Loaded",
         case profile_enabled() of
             true ->
-                riak_stats_profiles:load_profile(ConcatStrName,Node);
+                riak_stats_profiles:load_profile(ConcatStrName, Node);
             False ->
                 {False, ConcatStrName}
         end).
@@ -461,7 +468,7 @@ load_profile(ProfileName,Node) ->
 load_profile_all(ProfileName) ->
     ConcatStrName = sanitise_profile_input(ProfileName),
     Nodes = [node()|nodes()],
-    load_profile(ConcatStrName,Nodes).
+    load_profile(ConcatStrName, Nodes).
 
 -spec(get_profile(profile_name()) -> ok).
 get_profile(ProfileName) ->
@@ -539,7 +546,7 @@ reset_profile_all() ->
     reset_profile([node()|nodes()]).
 
 profile_enabled() ->
-    case stats_persist:enabled() of
+    case riak_stats_metadata:enabled() of
         false -> {error, persistence_disabled};
         true -> true
     end.
@@ -550,9 +557,9 @@ sanitise_profile_input(ProfileName) ->
     %% spaces.
     string:join(ProfileName, " ").
 
-print_profile(Action,{ok,ProfileName}) ->
-    io:fwrite("Profile ~s : ~p ~n", [Action,ProfileName]);
-print_profile(Action,{{error,Reason},ProfileName}) ->
+print_profile(Action, {ok, ProfileName}) ->
+    io:fwrite("Profile ~s : ~p ~n", [Action, ProfileName]);
+print_profile(Action, {{error, Reason}, ProfileName}) ->
     io:fwrite("Error, not ~s ~p -> because : ~p",[Action, ProfileName, Reason]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -562,8 +569,8 @@ print_profile(Action,{{error,Reason},ProfileName}) ->
 %% @doc Setup a gen_server to push stats to an endpoint
 %% @see riak_stats_push:maybe_start_server/2 @end
 %%%-----------------------------------------------------------------------------
--spec(setup(console_arg()) -> ok).
-setup(ListofArgs) ->
+-spec(start(console_arg()) -> ok).
+start(ListofArgs) ->
     {Protocol, Data} = sanitise_push_input(ListofArgs),
     riak_stats_push:maybe_start_server(Protocol, Data).
 
@@ -571,8 +578,8 @@ setup(ListofArgs) ->
 %% @doc kill the gen_server that is pushing stats to an endpoint,
 %% @see riak_stats_push:terminate_server/2 @end
 %%%-----------------------------------------------------------------------------
--spec(setdown(console_arg()) -> ok).
-setdown(ListofArgs) ->
+-spec(stop(console_arg()) -> ok).
+stop(ListofArgs) ->
     {Protocol, Data} = sanitise_push_input(ListofArgs),
     riak_stats_push:terminate_server(Protocol, Data).
 
@@ -598,8 +605,8 @@ sanitise_push(HostPort, Protocol, Instance, Stats) ->
     ThePort = get_port(Port0),
     TheProtocol = list_to_atom(Protocol),
     TheInstance = Instance,
-    {TheStats,_,_,_} = sanitise_stat_input(Stats),
-    {TheProtocol, {{ThePort,TheInstance,TheHost}, TheStats}}.
+    {TheStats, _, _, _} = sanitise_stat_input(Stats),
+    {TheProtocol, {{ThePort, TheInstance, TheHost}, TheStats}}.
 
 get_host_port(HostPort) ->
     [Host|Port] = re:split(HostPort,"\\:",[{return,list}]),
@@ -625,7 +632,7 @@ get_port(Port) -> list_to_integer(Port).
 -spec(find_push_stats_all(console_arg()) -> ok).
 find_push_stats_all(Arg) ->
     Sanitised = sanitise_push_input(Arg),
-    print_info(riak_stats_push:find_push_stats([node()|nodes()],Sanitised)).
+    print_info(riak_stats_push:find_push_stats([node() | nodes()], Sanitised)).
 
 %%%-----------------------------------------------------------------------------
 %% @doc find information about stats that are being pushed on this node @end
@@ -644,10 +651,10 @@ print_info(Info) ->
     ColumnArgs =
         ["LastDate","LastTime","Protocol","Name","Date","Time",
             "Node","ServerIp","Port","Running?","Stats"],
-    io:format(String,ColumnArgs),
+    io:format(String, ColumnArgs),
     lists:foreach(
         fun
-            ({{Protocol,Instance},
+            ({{Protocol, Instance},
                 #{original_dt   := OriginalDateTime,
                     modified_dt := ModifiedDateTime,
                     running     := Running,
@@ -668,9 +675,9 @@ print_info(Info) ->
                 SPort = integer_to_list(Port),
                 SRunning = atom_to_list(Running),
                 StatsString = io_lib:format("~p",[Stats]),
-                Args = [LastDate,LastTime,SProtocol,SInstance,Date,
-                    Time,SNode,ServerIp,SPort,SRunning,StatsString],
-                io:format(String,Args);
+                Args = [LastDate, LastTime, SProtocol, SInstance, Date,
+                    Time, SNode, ServerIp, SPort, SRunning, StatsString],
+                io:format(String, Args);
             (_Other) -> ok
         end, Info).
 
@@ -701,18 +708,18 @@ integers_to_strings(IntegerList) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Other Functions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 -spec(print(atom()|string()|list()|found_stats()|any()) -> term()).
-print(undefined)   -> print([]);
-print([undefined]) -> print([]);
-print({Stats,DPs}) -> print(Stats,DPs);
-print(Arg)         -> print(Arg, []).
+print(undefined)    -> print([]);
+print([undefined])  -> print([]);
+print({Stats, DPs}) -> print(Stats, DPs);
+print(Arg)          -> print(Arg, []).
 
 print([], _) ->
     io:fwrite("No Matching Stats~n");
-print(NewStats,Args) ->
+print(NewStats, Args) ->
     lists:map(fun
 
                   ({N,_T,_S}) when Args == [] -> get_value(N);
-                  ({N, T, S}) ->  find_stats_info({N,T,S}, Args);
+                  ({N, T, S}) ->  find_stats_info({N, T, S}, Args);
 
                   %% legacy pattern
                   (Legacy) -> legacy_map(Legacy)
