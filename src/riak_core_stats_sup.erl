@@ -22,8 +22,13 @@
 -export([start_server/1, stop_server/1]).
 
 %% Helper macro for declaring children of supervisor
--define(CHILD(I, Type, Timeout), {I, {I, start_link, []}, permanent, Timeout, Type, [I]}).
 -define(CHILD(I, Type), ?CHILD(I, Type, 5000)).
+-define(CHILD(I, Type, Timeout), #{id       => I,
+                                   start    => {I, start_link, []},
+                                   restart  => permanent,
+                                   shutdown => Timeout,
+                                   type     => Type,
+                                   modules  =>[I]}).
 
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
@@ -37,20 +42,18 @@ init([]) ->
                  intensity => MaxRestarts,
                  period    => MaxSecondsBetweenRestarts},
 
-    PushSup = #{id       => riak_stats_push_sup,
-                start    => {riak_stats_push_sup, start_link, []},
-                restart  => permanent,
-                shutdown => 5000,
-                type     => supervisor,
-                modules  => [riak_stats_push_sup]},
-
+    StatsSup = ?CHILD(riak_stats_sup, supervisor),
     CacheChild = ?CHILD(riak_core_stat_cache, worker),
 
     StatChildren = [stat_server(Mod) || {_App, Mod} <- riak_core:stat_mods()],
 
-    Children = [PushSup, CacheChild | StatChildren],
+    Children = [StatsSup, CacheChild | StatChildren],
 
     {ok, {SupFlags, Children}}.
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
 
 start_server(Mod) ->
     Ref = stat_server(Mod),

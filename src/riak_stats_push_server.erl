@@ -22,7 +22,7 @@
 -define(SERVER, ?MODULE).
 
 -record(state, {socket      :: socket(),
-                port        :: port(),
+                port        :: inet:port_number(),
                 host        :: host(),
                 instance    :: instance(),
                 stats       :: stats(),
@@ -51,7 +51,8 @@ start_link(Obj) ->
     {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
 init({Info, Protocol}) ->
-    case open(Protocol, Info) of
+    {{Port, _Instance, Host}, _Stats} = Info,
+    case open(Protocol, Port, Host) of
         {ok, Socket} ->
             State = create_state(Protocol, Socket, Info),
             schedule_push_stats(),
@@ -123,10 +124,10 @@ code_change(_OldVsn, State, _Extra) ->
 %%%=============================================================================
 %%% Internal functions
 %%%=============================================================================
-open(udp, {{Port, _Instance, _Host}, _Stats})->
+open(udp, Port, _Host)->
     Options = ?OPTIONS,
     gen_udp:open(Port, Options);
-open(tcp, {{Port, _Instance, Host}, _Stats}) ->
+open(tcp, Port, Host) ->
     Options = ?OPTIONS,
     gen_tcp:connect(Host,Port,Options).
 
@@ -145,12 +146,14 @@ terminate_server(Key) ->
     riak_stats_push_sup:stop_running_server(?PUSH_PREFIX, Key).
 
 %%------------------------------------------------------------------------------
+-type error_tcp() :: closed | inet:posix().
+-type error_udp() :: not_owner | inet:posix().
+-spec(send(socket(), list())                 -> ok | {error, error_tcp()}).
+-spec(send(socket(), host(), inet:port_number(), list())
+                                             -> ok | {error, error_udp()}).
 
-send(Socket, Data) ->
-    gen_tcp:send(Socket, Data).
-
-send(Socket, Host, Port, Data) ->
-    gen_udp:send(Socket, Host, Port, Data).
+send(Socket, Data) -> gen_tcp:send(Socket, Data).
+send(Socket, Host, Port, Data) -> gen_udp:send(Socket, Host, Port, Data).
 
 send_after(Interval, Arg) -> erlang:send_after(Interval,self(),Arg).
 

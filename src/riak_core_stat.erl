@@ -41,7 +41,7 @@
 -endif.
 
 -define(SERVER, ?MODULE).
-
+-define(PREFIX, riak).
 -define(APP, riak_core).
 
 start_link() ->
@@ -51,60 +51,50 @@ register_stats() ->
     register_stats(common, system_stats()),
     register_stats(?APP, stats()).
 
-%% @spec register_stats(App, Stats) -> ok
+%% @spec register_stats(App, Stats) -> no_return()
 %% @doc (Re-)Register a list of metrics for App.
 register_stats(App, Stats) ->
-    P = prefix(),
     lists:foreach(fun(Stat) ->
-			  register_stat(P, App, Stat)
+			  riak_stats:register([?PREFIX, App|Stat])
 		  end, Stats).
 
-register_stat(P, App, Stat) ->
-    {Name, Type, Opts, Aliases} =
-        case Stat of
-            {N, T}         -> {N, T, [], []};
-            {N, T, Os}     -> {N, T, Os, []};
-            {N, T, Os, As} -> {N, T, Os, As}
-        end,
-    StatName = stat_name(P, App, Name),
-    exometer:re_register(StatName, Type, Opts),
-    lists:foreach(
-      fun({DP, Alias}) ->
-              exometer_alias:new(Alias, StatName, DP)
-      end, Aliases).
-
 register_vnode_stats(Module, Index, Pid) ->
-    P = prefix(),
-    exometer:ensure([P, ?APP, vnodes_running, Module],
-		    { function, exometer, select_count,
-		      [[{ {[P, ?APP, vnodeq, Module, '_'], '_', '_'},
-			  [], [true] }]], match, value },
-                    [{aliases, [{value, vnodeq_atom(Module, <<"s_running">>)}]}]),
-    exometer:ensure([P, ?APP, vnodeq, Module],
-		    {function, riak_core_stat, vnodeq_stats, [Module],
-		     histogram, [mean,median,min,max,total]},
-                    [{aliases, [{mean  , vnodeq_atom(Module, <<"q_mean">>)},
-				{median, vnodeq_atom(Module, <<"q_median">>)},
-				{min   , vnodeq_atom(Module, <<"q_min">>)},
-				{max   , vnodeq_atom(Module, <<"q_max">>)},
-				{total , vnodeq_atom(Module, <<"q_total">>)}]}
-		    ]),
-    exometer:re_register(
-      [P, ?APP, vnodeq, Module, Index],
-      function, [{ arg, {erlang, process_info, [Pid, message_queue_len],
-                                match, {'_', value} }}]).
+    F = fun vnodeq_atom/2,
+    Vnode_Stat_1 =
+        {[vnodes_running, Module],
+            {function, exometer, select_count,
+                [[{{[vnodeq, Module, '_'], '_', '_'},
+                    [], [true]}]], match, value},
+            [{aliases,
+                [{value, F(Module, <<"s_running">>)}]}]},
+
+    Vnode_Stat_2 =
+        {[vnodeq, Module],
+            {function, riak_core_stat, vnodeq_stats, [Module],
+                histogram, [mean, median, min, max, total]},
+            [{aliases,
+                [{mean,  F(Module, <<"q_mean">>)},
+                    {median,F(Module, <<"q_median">>)},
+                    {min,   F(Module, <<"q_min">>)},
+                    {max,   F(Module, <<"q_max">>)},
+                    {total, F(Module, <<"q_total">>)}]}]},
+
+    Vnode_Stat_3 = {[vnodeq, Module, Index],
+        function, [{arg, {erlang, process_info, [Pid, message_queue_len], match, {'_', value}}}]},
+
+
+    RegisterStats = [Vnode_Stat_1, Vnode_Stat_2, Vnode_Stat_3],
+    ok = register_stats(?APP, RegisterStats).
+
+%%%----------------------------------------------------------------%%%
 
 unregister_vnode_stats(Module, Index) ->
-    exometer:delete([riak_core_stat:prefix(), ?APP, vnodeq, Module, Index]).
+    unregister_vnode_stats(Module, Index, vnodeq, ?APP).
 
-stat_name(P, App, N) when is_atom(N) ->
-    stat_name_([P, App, N]);
-stat_name(P, App, N) when is_list(N) ->
-    stat_name_([P, App | N]).
-
-stat_name_([P, [] | Rest]) -> [P | Rest];
-stat_name_(N) -> N.
-
+unregister_vnode_stats([Op, time], Index, Type, App) ->
+    riak_stats:unregister([?PREFIX, App, Type,Op, time, Index]);
+unregister_vnode_stats(Module, Index, Type, App) ->
+    riak_stats:unregister([?PREFIX, App, Type, Module, Index]).
 
 %% @spec get_stats() -> proplist()
 %% @doc Get the current aggregation of stats.
@@ -112,8 +102,7 @@ get_stats() ->
     get_stats(?APP).
 
 get_stats(App) ->
-    P = prefix(),
-    exometer:get_values([P, App]).
+    riak_stats:get_stats([?PREFIX, App]).
 
 update(Arg) ->
     gen_server:cast(?SERVER, {update, Arg}).
@@ -131,13 +120,13 @@ handle_call(_Req, _From, State) ->
     {reply, ok, State}.
 
 handle_cast({update, {worker_pool, vnode_pool}}, State) ->
-    exometer_update([prefix(), ?APP, vnode, worker_pool], 1),
+    exometer_update([prefix(), ?APP, vnode, worker_pool], 1, counter),
     {noreply, State};
 handle_cast({update, {worker_pool, Pool}}, State) ->
-    exometer_update([prefix(), ?APP, node, worker_pool, Pool], 1),
+    exometer_update([prefix(), ?APP, node, worker_pool, Pool], 1, counter),
     {noreply, State};
 handle_cast({update, Arg}, State) ->
-    exometer_update([prefix(), ?APP, update_metric(Arg)], update_value(Arg)),
+    exometer_update([prefix(), ?APP, update_metric(Arg)], update_value(Arg), update_type(Arg)),
     {noreply, State};
 handle_cast(_Req, State) ->
     {noreply, State}.
@@ -152,13 +141,9 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 
-exometer_update(Name, Value) ->
-    case exometer:update(Name, Value) of
-        {error, not_found} ->
-            lager:debug("~p not found on update.", [Name]);
-        ok ->
-            ok
-    end.
+exometer_update(Name, Value, Type) ->
+    StatName = lists:flatten([?PREFIX, ?APP | Name]),
+    riak_stats:update(StatName, Value, Type).
 
 update_metric(converge_timer_begin ) -> converge_delay;
 update_metric(converge_timer_end   ) -> converge_delay;
@@ -173,29 +158,36 @@ update_value(converge_timer_end   ) -> timer_end;
 update_value(rebalance_timer_end  ) -> timer_end;
 update_value(_) -> 1.
 
+update_type(converge_timer_begin ) -> duration;
+update_type(converge_timer_end   ) -> duration;
+update_type(rebalance_timer_begin) -> duration;
+update_type(rebalance_timer_end  ) -> duration;
+update_type(_) -> '_'.
+
 %% private
 stats() ->
-    [{ignored_gossip_total, counter, [], [{value, ignored_gossip_total}]},
-     {rings_reconciled, spiral, [], [{count, rings_reconciled_total},
-                                     {one, rings_reconciled}]},
+    [{ignored_gossip_total,     counter,  [], [{value, ignored_gossip_total}]},
+     {rings_reconciled,         spiral,   [], [{count, rings_reconciled_total},
+                                               {one, rings_reconciled}]},
      {ring_creation_size,
       {function, app_helper, get_env, [riak_core, ring_creation_size],
-       match, value}, [], [{value, ring_creation_size}]},
-     {gossip_received, spiral, [], [{one, gossip_received}]},
-     {rejected_handoffs, counter, [], [{value, rejected_handoffs}]},
-     {handoff_timeouts, counter, [], [{value, handoff_timeouts}]},
-     {dropped_vnode_requests, counter, [], [{value, dropped_vnode_requests_total}]},
-     {converge_delay, duration, [], [{mean, converge_delay_mean},
-                                     {min, converge_delay_min},
-                                     {max, converge_delay_max},
-                                     {last, converge_delay_last}]},
-     {rebalance_delay, duration, [], [{min, rebalance_delay_min},
-                                      {max, rebalance_delay_max},
-                                      {mean, rebalance_delay_mean},
-                                      {last, rebalance_delay_last}]} |  nwp_stats()].
+       match, value},                     [], [{value, ring_creation_size}]},
+     {gossip_received,          spiral,   [], [{one, gossip_received}]},
+     {rejected_handoffs,        counter,  [], [{value, rejected_handoffs}]},
+     {handoff_timeouts,         counter,  [], [{value, handoff_timeouts}]},
+     {dropped_vnode_requests,   counter,  [], [{value, dropped_vnode_requests_total}]},
+     {converge_delay,           duration, [], [{mean, converge_delay_mean},
+                                               {min, converge_delay_min},
+                                               {max, converge_delay_max},
+                                               {last, converge_delay_last}]},
+     {rebalance_delay,          duration, [], [{min, rebalance_delay_min},
+                                               {max, rebalance_delay_max},
+                                               {mean, rebalance_delay_mean},
+                                               {last, rebalance_delay_last}]}
+        | nwp_stats()].
 
 nwp_stats() ->
-    [ {[vnode, worker_pool], counter, [], [{value, vnode_worker_pool_total}]},
+    [ {[vnode, worker_pool],              counter, [], [{value, vnode_worker_pool_total}]},
       {[node, worker_pool, unregistered], counter, [], [{value, node_worker_pool_unregistered_total}]} |
       [nwp_stat(Pool) || Pool <- riak_core_node_worker_pool:pools()]].
 
