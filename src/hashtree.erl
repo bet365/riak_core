@@ -154,16 +154,14 @@
          run_multiple/2,
          run_remote/0,
          run_remote/1]).
--endif. % TEST
 
 -ifdef(EQC).
 -export([prop_correct/0, prop_sha/0, prop_est/0]).
 -include_lib("eqc/include/eqc.hrl").
 -endif.
 
--ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
--endif.
+-endif. %% TEST
 
 -define(NUM_SEGMENTS, (1024*1024)).
 -define(WIDTH, 1024).
@@ -1167,7 +1165,7 @@ compare(Level, Bucket, Tree, Remote, AccFun, KeyAcc) ->
     Inter = ordsets:intersection(ordsets:from_list(HL1),
                                  ordsets:from_list(HL2)),
     Diff = ordsets:subtract(Union, Inter),
-    lager:debug("Tree ~p level ~p bucket ~p\nL=~p\nR=~p\nD=\n",
+    lager:debug("Tree ~p level ~p bucket ~p\nL=~p\nR=~p\nD=~p\n",
         [Tree, Level, Bucket, HL1, HL2, Diff]),
     KeyAcc3 =
         lists:foldl(fun({Bucket2, _}, KeyAcc2) ->
@@ -1584,6 +1582,7 @@ opened_closed_test() ->
 %%% EQC
 %%%===================================================================
 
+-ifdef(TEST).
 -ifdef(EQC).
 prop_sha() ->
     %% NOTE: Generating 1MB (1024 * 1024) size binaries is incredibly slow
@@ -1691,4 +1690,5 @@ prop_est() ->
                 ?assertEqual(true, MaxDiff > Diff),
                 true
             end).
+-endif.
 -endif.
