@@ -21,7 +21,7 @@
 -module(riak_core_console).
 %% Legacy exports - unless needed by other modules, only expose
 %% functionality via command/1
--export([member_status/1, ring_status/1, print_member_status/2,
+-export([maintenance_mode/1, member_status/1, ring_status/1, print_member_status/2,
          stage_leave/1, stage_remove/1, stage_replace/1, stage_resize_ring/1,
          stage_force_replace/1, print_staged/1, commit_staged/1,
          clear_staged/1, transfer_limit/1, pending_claim_percentage/2,
@@ -50,6 +50,19 @@ pending_claim_percentage(Ring, Node) ->
     RingPercent = length(Indices) * 100 / RingSize,
     NextPercent = length(NextIndices) * 100 / FutureRingSize,
     {RingPercent, NextPercent}.
+
+maintenance_mode([]) ->
+    case riak_core_node_watcher:node_status() of
+        maint ->
+            io:format("Node is already in maintenance mode");
+        up ->
+
+            riak_kv_entropy_manager:disable(),
+            riak_core_node_watcher:maint_mode();
+        down ->
+            riak_kv_entropy_manager:disable(),
+            riak_core_node_watcher:maint_mode()
+    end.
 
 member_status([]) ->
     {ok, Ring} = riak_core_ring_manager:get_my_ring(),

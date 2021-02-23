@@ -36,6 +36,8 @@
          service_down/2,
          node_up/0,
          node_down/0,
+         maint_mode/0,
+    node_status/0,
          services/0, services/1,
          nodes/1,
          avsn/0]).
@@ -51,7 +53,9 @@
                  peers = [],
                  avsn = 0,
                  bcast_tref,
-                 bcast_mod = {gen_server, abcast}}).
+                 bcast_mod = {gen_server, abcast},
+                 broadcast = true,
+                 maintenance_nodes = []}).
 
 -record(health_check, { state = 'waiting' :: 'waiting' | 'checking' | 'suspend',
                         callback :: {atom(), atom(), [any()]},
@@ -143,6 +147,12 @@ node_up() ->
 node_down() ->
     gen_server:call(?MODULE, {node_status, down}, infinity).
 
+maint_mode() ->
+    gen_server:call(?MODULE, {node_status, maint}, infinity).
+
+node_status() ->
+    gen_server:call(?MODULE, current_status, infinity).
+
 services() ->
     gen_server:call(?MODULE, services, infinity).
 
@@ -180,7 +190,13 @@ init([]) ->
     %% Setup ETS table to track node status
     ?MODULE = ets:new(?MODULE, [protected, {read_concurrency, true}, named_table]),
 
-    {ok, schedule_broadcast(#state{})}.
+    case app_helper:get_env(riak_core, maint_mode, false) of
+        true ->
+            lager:info("Watcher init not triggering broadcast"),
+            {ok, schedule_broadcast(#state{broadcast = false, status = maint})}; %% Whilst in Maint mode we do not want to inform peers that we are up. We should be down according to them. Until we manually update them on our situation
+        false ->
+            {ok, schedule_broadcast(#state{})}
+    end.
 
 handle_call({set_bcast_mod, Module, Fn}, _From, State) ->
     %% Call available for swapping out how broadcasts are generated
@@ -255,11 +271,44 @@ handle_call({node_status, Status}, _From, State) ->
                          Healths = State#state.health_checks
                  end,
                  local_update(State#state { status = up, health_checks = Healths });
-
+             {up, maint} ->
+                 case State#state.healths_enabled of
+                     true ->
+                         Healths = all_health_fsms(suspend, State#state.health_checks);
+                     false ->
+                         Healths = State#state.health_checks
+                 end,
+                 local_update(State#state { status = maint, health_checks = Healths});
+             {down, maint} ->
+                 case State#state.healths_enabled of
+                     true ->
+                         Healths = all_health_fsms(suspend, State#state.health_checks);
+                     false ->
+                         Healths = State#state.health_checks
+                 end,
+                 local_update(State#state { status = maint, health_checks = Healths });
+             {maint, up} ->
+                 case State#state.healths_enabled of
+                     true ->
+                         Healths = all_health_fsms(resume, State#state.health_checks);
+                     false ->
+                         Healths = State#state.health_checks
+                 end,
+                 local_update(State#state { status = up, health_checks = Healths });
+             {maint, down} ->
+                 case State#state.healths_enabled of
+                     true ->
+                         Healths = all_health_fsms(suspend, State#state.health_checks);
+                     false ->
+                         Healths = State#state.health_checks
+                 end,
+                 local_delete(State#state { status = down, health_checks = Healths});
              {Status, Status} -> %% noop
                  State
     end,
     {reply, ok, update_avsn(S2)};
+handle_call(current_status, _From, State) ->
+    {reply, State#state.status, State};
 handle_call(services, _From, State) ->
     Res = [Service || {{by_service, Service}, Nds} <- ets:tab2list(?MODULE),
                       Nds /= []],
@@ -283,17 +332,29 @@ handle_cast({ring_update, R}, State) ->
     %% and broadcast out current status to those peers.
     Peers0 = ordsets:from_list(riak_core_ring:all_members(R)),
     Peers = ordsets:del_element(node(), Peers0),
-
+    lager:info("watch ring_update message with peers: ~p~n", [Peers]),
     S2 = peers_update(Peers, State),
     {noreply, update_avsn(S2)};
 
 handle_cast({up, Node, Services}, State) ->
+    lager:info("Handle cast message for up, node that sent it: ~p~n", [Node]),
     S2 = node_up(Node, Services, State),
     {noreply, update_avsn(S2)};
 
 handle_cast({down, Node}, State) ->
+    lager:info("Handle cast message for down node: ~p~n", [Node]),
     node_down(Node, State),
     {noreply, update_avsn(State)};
+
+handle_cast({maint, Node}, State) ->
+    node_down(Node, State),
+    {noreply, update_avsn(State)};
+%%    case lists:member(Node, MaintNodes) of
+%%        true ->
+%%            {noreply, update_avsn(State)};
+%%        false ->
+%%            {noreply, update_avsn(State#state{maintenance_nodes = [Node | MaintNodes]})}
+%%    end;
 
 handle_cast({health_check_result, Pid, R}, State) ->
     Service = erlang:erase(Pid),
@@ -384,12 +445,16 @@ delete_service_mref(Id) ->
     end.
 
 
+broadcast(_Nodes, #state{broadcast = false} = State) ->
+    State;
 broadcast(Nodes, State) ->
     case (State#state.status) of
         up ->
             Msg = {up, node(), State#state.services};
         down ->
-            Msg = {down, node()}
+            Msg = {down, node()};
+        maint ->
+            Msg = {maint, node()}
     end,
     {Mod, Fn} = State#state.bcast_mod,
     Mod:Fn(Nodes, ?MODULE, Msg),
@@ -511,6 +576,8 @@ peers_update(NewPeers, State) ->
     %% Identify what peers have been added and deleted
     Added   = ordsets:subtract(NewPeers, State#state.peers),
     Deleted = ordsets:subtract(State#state.peers, NewPeers),
+    lager:info("Added peers: ~p~n", [Added]),
+    lager:info("Deleted peers: ~p~n", [Deleted]),
 
     %% For peers that have been deleted, remove their entries from
     %% the ETS table; we no longer care about their status
