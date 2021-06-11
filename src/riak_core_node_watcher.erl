@@ -293,21 +293,33 @@ handle_call({node_status, Status}, _From, State) ->
                  MaintNodes = State#state.maintenance_nodes,
                  local_update(State#state { status = maint, health_checks = Healths, maintenance_nodes = [node() | MaintNodes] });
              {maint, up} ->
-                 case State#state.healths_enabled of
+                 Healths = case State#state.healths_enabled of
                      true ->
                          Healths = all_health_fsms(resume, State#state.health_checks);
                      false ->
                          Healths = State#state.health_checks
                  end,
-                 local_update(State#state { status = up, health_checks = Healths });
+                 MaintNodes = State#state.maintenance_nodes,
+                 case lists:member(node(), MaintNodes) of
+                     true ->
+                         local_update(State#state { status = up, health_checks = Healths, maintenance_nodes = lists:delete(node(), MaintNodes)});
+                     false ->
+                         local_update(State#state { status = up, health_checks = Healths})
+                 end;
              {maint, down} ->
-                 case State#state.healths_enabled of
+                 Healths = case State#state.healths_enabled of
                      true ->
                          Healths = all_health_fsms(suspend, State#state.health_checks);
                      false ->
                          Healths = State#state.health_checks
                  end,
-                 local_delete(State#state { status = down, health_checks = Healths});
+                 MaintNodes = State#state.maintenance_nodes,
+                 case lists:member(node(), MaintNodes) of
+                     true ->
+                         local_update(State#state { status = down, health_checks = Healths, maintenance_nodes = lists:delete(node(), MaintNodes)});
+                     false ->
+                         local_update(State#state { status = down, health_checks = Healths})
+                 end;
              {Status, Status} -> %% noop
                  State
     end,
