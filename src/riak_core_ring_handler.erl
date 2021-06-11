@@ -147,8 +147,10 @@ ensure_vnodes_started({App,Mod}, Ring) ->
                                                      Mod:module_info(exports)),
                        case HasStartVnodes of
                            true ->
+                               lager:info("riak_core_ring_handler calling start_vnode in riak_kv_vnode app: ~p mod: ~p wiuth startable11: ~p~n", [App, Mod, Startable]),
                                Mod:start_vnodes(Startable);
                            false ->
+                               lager:info("riak_core_ring_handler calling start_vnode in riak_kv_vnode app: ~p mod: ~p  wiuth startable22: ~p~n", [App, Mod, Startable]),
                                [Mod:start_vnode(I) || I <- Startable]
                        end,
 
@@ -185,6 +187,8 @@ startable_vnodes(Mod, Ring) ->
                             riak_core_ring:my_indices(Ring)
                     end;
                 RO ->
+                    lager:info("Random Indices: ~p~n", [riak_core_ring:random_other_index(Ring, Excl)]),
+                    lager:info("Other Indices: ~p~n", [riak_core_ring:my_indices(Ring)]),
                     [RO | riak_core_ring:my_indices(Ring)]
             end
     end.

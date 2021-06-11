@@ -192,18 +192,21 @@ proxy_cast(Who, Req) ->
 proxy_cast({VMaster, Node}, Req, How) ->
     case riak_core_capability:get({riak_core, vnode_routing}, legacy) of
         legacy ->
+            lager:info("legacy cast"),
             if How == normal ->
                     gen_server:cast({VMaster, Node}, Req);
                How == unreliable ->
                     riak_core_send_msg:cast_unreliable({VMaster, Node}, Req)
             end;
         proxy ->
+            lager:info("proxy_cast"),
             do_proxy_cast({VMaster, Node}, Req, How)
     end.
 
 do_proxy_cast({VMaster, Node}, Req=?VNODE_REQ{index=Idx}, How) ->
     Mod = vmaster_to_vmod(VMaster),
     Proxy = riak_core_vnode_proxy:reg_name(Mod, Idx, Node),
+    lager:info("proxy cast Mod: ~p Proxy: ~p Idx: ~p Node: ~p~n", [Mod, Proxy, Idx, Node]),
     send_an_event(Proxy, Req, How),
     ok;
 do_proxy_cast({VMaster, Node}, Req=?COVERAGE_REQ{index=Idx}, How) ->

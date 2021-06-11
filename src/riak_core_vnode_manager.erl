@@ -31,7 +31,7 @@
          force_handoffs/0, repair/3, all_handoffs/0, repair_status/1, xfer_complete/2,
          kill_repairs/1]).
 -export([all_index_pid/1, get_vnode_pid/2, start_vnode/2,
-         unregister_vnode/2, unregister_vnode/3, vnode_event/4]).
+         unregister_vnode/2, unregister_vnode/3, vnode_event/4, get_all_vnodes/0]).
 %% Field debugging
 -export([get_tab/0]).
 
@@ -504,6 +504,7 @@ maybe_ring_changed(RingID, Ring, CHBin, State=#state{last_ring_id=LastID}) ->
     end.
 
 ring_changed(Ring, CHBin, State) ->
+    lager:info("Calling ring_changed"),
     %% Update vnode forwarding state
     AllVNodes = get_all_vnodes(),
     Mods = [Mod || {_, Mod} <- riak_core:vnode_modules()],
@@ -518,6 +519,7 @@ ring_changed(Ring, CHBin, State) ->
     State3.
 
 maybe_ensure_vnodes_started(Ring) ->
+    lager:info("calling maybe_ensure_vnodes_started"),
     ExitingStates = [leaving, exiting, invalid],
     Status = riak_core_ring:member_status(Ring, node()),
     case lists:member(Status, ExitingStates) of
@@ -529,12 +531,14 @@ maybe_ensure_vnodes_started(Ring) ->
     end.
 
 ensure_vnodes_started(Ring) ->
+    lager:info("Calling ensure_vnode_started"),
     case riak_core_ring:check_lastgasp(Ring) of
         true ->
             lager:info("Don't start vnodes - last gasp ring");
         false ->    
             spawn(fun() ->
                   try
+                      lager:info("core_vnode_manager ensure_vnode_started"),
                       riak_core_ring_handler:ensure_vnodes_started(Ring)
                   catch
                       ?_exception_(T, R, StackToken) ->
@@ -551,6 +555,7 @@ schedule_management_timer() ->
     erlang:send_after(ManagementTick, ?MODULE, management_tick).
 
 trigger_ownership_handoff(Transfers, Mods, Ring, State) ->
+    lager:info("calling trigger_ownership_handoff"),
     IsResizing = riak_core_ring:is_resizing(Ring),
     Throttle = limit_ownership_handoff(Transfers, IsResizing),
     Awaiting = [{Mod, Idx} || {Idx, Node, _, CMods, S} <- Throttle,
@@ -558,6 +563,7 @@ trigger_ownership_handoff(Transfers, Mods, Ring, State) ->
                               S =:= awaiting,
                               Node =:= node(),
                               not lists:member(Mod, CMods)],
+    lager:info("Awaiting: ~p~n", [Awaiting]),
     _ = [maybe_trigger_handoff(Mod, Idx, State) || {Mod, Idx} <- Awaiting],
     ok.
 
@@ -614,7 +620,8 @@ get_vnode(IdxList, Mod, State) ->
         fun(Idx) ->
                 ForwardTo = get_forward(Mod, Idx, State),
                 lager:debug("Will start VNode for partition ~p", [Idx]),
-                {ok, Pid} =
+            lager:info("Starting core vnode: ~p~n", [{Mod, Idx, ForwardTo}]),
+            {ok, Pid} =
                     riak_core_vnode_sup:start_vnode(Mod, Idx, ForwardTo),
                 register_vnode_stats(Mod, Idx, Pid),
                 lager:debug("Started VNode, waiting for initialization to complete ~p, ~p ", [Pid, Idx]),

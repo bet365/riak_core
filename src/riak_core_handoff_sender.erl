@@ -91,6 +91,7 @@ start_link(TargetNode, Module, {Type, Opts}, Vnode) ->
 %%%===================================================================
 
 start_fold(TargetNode, Module, {Type, Opts}, ParentPid, SslOpts) ->
+    lager:info("SENDER start fold has been called with the following arguments, TargetNode: ~p, Module: ~p, Type: ~p, Opts: ~p, SSLOpts: ~p~n", [TargetNode, Module, Type, Opts, SslOpts]),
     SrcNode = node(),
     SrcPartition = get_src_partition(Opts),
     TargetPartition = get_target_partition(Opts),

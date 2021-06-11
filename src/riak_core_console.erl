@@ -58,10 +58,14 @@ maintenance_mode([]) ->
         up ->
 
             riak_kv_entropy_manager:disable(),
+%%            {ok, Ring} = riak_core_ring_manager:get_my_ring(),
             riak_core_node_watcher:maint_mode();
+%%            riak_repl_ring_handler:update_leader(Ring);
         down ->
             riak_kv_entropy_manager:disable(),
+%%            {ok, Ring} = riak_core_ring_manager:get_my_ring(),
             riak_core_node_watcher:maint_mode()
+%%            riak_repl_ring_handler:update_leader(Ring)
     end.
 
 member_status([]) ->

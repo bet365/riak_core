@@ -37,7 +37,8 @@
          node_up/0,
          node_down/0,
          maint_mode/0,
-    node_status/0,
+         maintenance_nodes/0,
+         node_status/0,
          services/0, services/1,
          nodes/1,
          avsn/0]).
@@ -54,7 +55,6 @@
                  avsn = 0,
                  bcast_tref,
                  bcast_mod = {gen_server, abcast},
-                 broadcast = true,
                  maintenance_nodes = []}).
 
 -record(health_check, { state = 'waiting' :: 'waiting' | 'checking' | 'suspend',
@@ -150,6 +150,9 @@ node_down() ->
 maint_mode() ->
     gen_server:call(?MODULE, {node_status, maint}, infinity).
 
+maintenance_nodes() ->
+    gen_server:call(?MODULE, maintenance_nodes, infinity).
+
 node_status() ->
     gen_server:call(?MODULE, current_status, infinity).
 
@@ -193,7 +196,7 @@ init([]) ->
     case app_helper:get_env(riak_core, maint_mode, false) of
         true ->
             lager:info("Watcher init not triggering broadcast"),
-            {ok, schedule_broadcast(#state{broadcast = false, status = maint})}; %% Whilst in Maint mode we do not want to inform peers that we are up. We should be down according to them. Until we manually update them on our situation
+            {ok, schedule_broadcast(#state{status = maint, maintenance_nodes = [node()]})}; %% Whilst in Maint mode we do not want to inform peers that we are up. We should be down according to them. Until we manually update them on our situation
         false ->
             {ok, schedule_broadcast(#state{})}
     end.
@@ -278,7 +281,8 @@ handle_call({node_status, Status}, _From, State) ->
                      false ->
                          Healths = State#state.health_checks
                  end,
-                 local_update(State#state { status = maint, health_checks = Healths});
+                 MaintNodes = State#state.maintenance_nodes,
+                 local_update(State#state { status = maint, health_checks = Healths, maintenance_nodes = [node() | MaintNodes]});
              {down, maint} ->
                  case State#state.healths_enabled of
                      true ->
@@ -286,7 +290,8 @@ handle_call({node_status, Status}, _From, State) ->
                      false ->
                          Healths = State#state.health_checks
                  end,
-                 local_update(State#state { status = maint, health_checks = Healths });
+                 MaintNodes = State#state.maintenance_nodes,
+                 local_update(State#state { status = maint, health_checks = Healths, maintenance_nodes = [node() | MaintNodes] });
              {maint, up} ->
                  case State#state.healths_enabled of
                      true ->
@@ -307,6 +312,10 @@ handle_call({node_status, Status}, _From, State) ->
                  State
     end,
     {reply, ok, update_avsn(S2)};
+
+handle_call(maintenance_nodes, _From, State) ->
+    {reply, State#state.maintenance_nodes, State};
+
 handle_call(current_status, _From, State) ->
     {reply, State#state.status, State};
 handle_call(services, _From, State) ->
@@ -336,25 +345,39 @@ handle_cast({ring_update, R}, State) ->
     S2 = peers_update(Peers, State),
     {noreply, update_avsn(S2)};
 
-handle_cast({up, Node, Services}, State) ->
+handle_cast({up, Node, Services}, #state{maintenance_nodes = MaintNodes} = State) ->
     lager:info("Handle cast message for up, node that sent it: ~p~n", [Node]),
-    S2 = node_up(Node, Services, State),
-    {noreply, update_avsn(S2)};
+    case lists:member(Node, MaintNodes) of
+        true ->
+            S2 = node_up(Node, Services, State),
+            {noreply, update_avsn(S2#state{maintenance_nodes = lists:delete(Node, MaintNodes)})};
+        false ->
+            S2 = node_up(Node, Services, State),
+            {noreply, update_avsn(S2)}
+    end;
 
-handle_cast({down, Node}, State) ->
+handle_cast({down, Node}, #state{maintenance_nodes = MaintNodes} = State) ->
     lager:info("Handle cast message for down node: ~p~n", [Node]),
-    node_down(Node, State),
-    {noreply, update_avsn(State)};
+    case lists:member(Node, MaintNodes) of
+        true ->
+            node_down(Node, State),
+            {noreply, update_avsn(State#state{maintenance_nodes = lists:delete(Node, MaintNodes)})};
+        false ->
+            node_down(Node, State),
+            {noreply, update_avsn(State)}
+    end;
 
-handle_cast({maint, Node}, State) ->
-    node_down(Node, State),
-    {noreply, update_avsn(State)};
-%%    case lists:member(Node, MaintNodes) of
-%%        true ->
-%%            {noreply, update_avsn(State)};
-%%        false ->
-%%            {noreply, update_avsn(State#state{maintenance_nodes = [Node | MaintNodes]})}
-%%    end;
+handle_cast({maint, Node}, #state{maintenance_nodes = MaintNodes} = State) ->
+%%    node_down(Node, State),
+%%    {noreply, update_avsn(State)};
+    case lists:member(Node, MaintNodes) of
+        true ->
+            node_down(Node, State),
+            {noreply, update_avsn(State)};
+        false ->
+            node_down(Node, State),
+            {noreply, update_avsn(State#state{maintenance_nodes = [Node | MaintNodes]})}
+    end;
 
 handle_cast({health_check_result, Pid, R}, State) ->
     Service = erlang:erase(Pid),
@@ -445,8 +468,6 @@ delete_service_mref(Id) ->
     end.
 
 
-broadcast(_Nodes, #state{broadcast = false} = State) ->
-    State;
 broadcast(Nodes, State) ->
     case (State#state.status) of
         up ->

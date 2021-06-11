@@ -78,6 +78,7 @@
          leave_member/3,
          exit_member/3,
          down_member/3,
+         maint_member/3,
          set_member/4,
          set_member/5,
          members/2,
@@ -173,7 +174,7 @@
     meta      % dict of cluster-wide other data (primarily bucket N-value, etc)
 }).
 
--type member_status() :: joining | valid | invalid | leaving | exiting | down.
+-type member_status() :: joining | valid | invalid | leaving | exiting | down | maint.
 
 %% type meta_entry(). Record for each entry in #chstate.meta
 -record(meta_entry, {
@@ -817,6 +818,9 @@ exit_member(PNode, State, Node) ->
 
 down_member(PNode, State, Node) ->
     set_member(PNode, State, Node, down).
+
+maint_member(PNode, State, Node) ->
+    set_member(PNode, State, Node, maint).
 
 set_member(Node, CState, Member, Status) ->
     VClock = vclock:increment(Node, CState?CHSTATE.vclock),
