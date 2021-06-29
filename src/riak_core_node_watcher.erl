@@ -295,9 +295,9 @@ handle_call({node_status, Status}, _From, State) ->
              {maint, up} ->
                  Healths = case State#state.healths_enabled of
                      true ->
-                         Healths = all_health_fsms(resume, State#state.health_checks);
+                         all_health_fsms(resume, State#state.health_checks);
                      false ->
-                         Healths = State#state.health_checks
+                         State#state.health_checks
                  end,
                  MaintNodes = State#state.maintenance_nodes,
                  case lists:member(node(), MaintNodes) of
@@ -309,9 +309,9 @@ handle_call({node_status, Status}, _From, State) ->
              {maint, down} ->
                  Healths = case State#state.healths_enabled of
                      true ->
-                         Healths = all_health_fsms(suspend, State#state.health_checks);
+                         all_health_fsms(suspend, State#state.health_checks);
                      false ->
-                         Healths = State#state.health_checks
+                         State#state.health_checks
                  end,
                  MaintNodes = State#state.maintenance_nodes,
                  case lists:member(node(), MaintNodes) of

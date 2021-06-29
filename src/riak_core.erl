@@ -21,7 +21,7 @@
 %% -------------------------------------------------------------------
 -module(riak_core).
 -export([stop/0, stop/1, join/1, join/5, staged_join/1, remove/1, down/1,
-         leave/0, remove_from_cluster/1]).
+         leave/0, maint/0, remove_from_cluster/1]).
 -export([vnode_modules/0, health_check/1]).
 -export([register/1, register/2, bucket_fixups/0, bucket_validators/0]).
 -export([stat_mods/0]).
@@ -253,6 +253,26 @@ standard_leave(Node) ->
               {new_ring, Ring3}
       end, []),
     ok.
+
+maint() ->
+    Node = node(),
+    {ok, Ring} = riak_core_ring_manager:get_raw_ring(),
+    case {riak_core_ring:all_members(Ring),
+        riak_core_ring:member_status(Ring, Node)} of
+        {_, invalid} ->
+            {error, not_member};
+        {[Node], _} ->
+            {error, only_member};
+        _ ->
+            lager:info("Attempting to update ring with maint node"),
+            riak_core_ring_manager:ring_trans(
+                fun(Ring2, _) ->
+                    Ring3 = riak_core_ring:maint_member(node(), Ring2, Node),
+%%                    Ring4 = riak_core_ring:ring_changed(node(), Ring3),
+                    {new_ring, Ring3}
+                end, []),
+            ok
+    end.
 
 %% @spec remove_from_cluster(ExitingNode :: atom()) -> term()
 %% @doc Cause all partitions owned by ExitingNode to be taken over
