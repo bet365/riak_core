@@ -51,21 +51,55 @@ pending_claim_percentage(Ring, Node) ->
     NextPercent = length(NextIndices) * 100 / FutureRingSize,
     {RingPercent, NextPercent}.
 
-maintenance_mode([]) ->
+maintenance_mode([enable]) ->
+    enable_maint_mode();
+maintenance_mode([disable]) ->
+    disable_maint_mode().
+enable_maint_mode() ->
+    {ok, Ring} = riak_core_ring_manager:get_my_ring(),
+    Me = node(),
     case riak_core_node_watcher:node_status() of
         maint ->
             io:format("Node is already in maintenance mode");
         up ->
-
             riak_kv_entropy_manager:disable(),
-%%            {ok, Ring} = riak_core_ring_manager:get_my_ring(),
-            riak_core_node_watcher:maint_mode();
-%%            riak_repl_ring_handler:update_leader(Ring);
+            lager:info("Disabled AAE"),
+            riak_core_node_watcher:maint_mode(),
+            lager:info("Triggered maint_mode"),
+            riak_core:maint(),
+            lager:info("Called core ring maint"),
+            case riak_repl2_leader:leader_node() of
+                Me ->
+                    lager:info("Is still leader after ring update"),
+                    ok;
+%%                    riak_repl_ring_handler:update_leader(Ring);
+                _ ->
+                    ok
+            end;
+        down -> %% TODO Does anything need doing here apart from disabling AAE and informing the ring?
+            riak_kv_entropy_manager:disable(),
+            riak_core_node_watcher:maint_mode(),
+            riak_core:maint(),
+            case riak_repl2_leader:leader_node() of
+                Me ->
+                    riak_repl_ring_handler:update_leader(Ring);
+                _ ->
+                    ok
+            end
+    end.
+disable_maint_mode() ->
+    {ok, Ring} = riak_core_ring_manager:get_my_ring(),
+    Me = node(),
+    case riak_core_node_watcher:node_status() of
+        maint ->
+            riak_kv_entropy_manager:enable(),
+            riak_core_node_watcher:node_up(),
+            riak_core_ring:set_member(Me, Ring, Ring, valid, same_vclock),
+            io:format("Maintenance mode disabled, node is now back in the ring~n");
+        up ->
+            io:format("Node is Up maintenance mode already disabled~n");
         down ->
-            riak_kv_entropy_manager:disable(),
-%%            {ok, Ring} = riak_core_ring_manager:get_my_ring(),
-            riak_core_node_watcher:maint_mode()
-%%            riak_repl_ring_handler:update_leader(Ring)
+            io:format("Node is Down maintenance mode already disabled~n")
     end.
 
 member_status([]) ->

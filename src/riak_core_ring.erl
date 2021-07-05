@@ -1741,6 +1741,10 @@ merge_status(leaving, _) ->
     leaving;
 merge_status(_, leaving) ->
     leaving;
+merge_status(maint, _) ->
+    maint;
+merge_status(_, maint) ->
+    maint;
 merge_status(_, _) ->
     invalid.
 
@@ -1765,7 +1769,7 @@ transfer_complete(CState=?CHSTATE{next=Next, vclock=VClock}, Idx, Mod) ->
 
 %% @private
 get_members(Members) ->
-    get_members(Members, [joining, valid, leaving, exiting, down]).
+    get_members(Members, [joining, valid, leaving, exiting, down, maint]).
 
 %% @private
 get_members(Members, Types) ->
